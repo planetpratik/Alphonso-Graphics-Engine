@@ -2,9 +2,12 @@ cmake_minimum_required (VERSION 3.14)
 
 project(AlphonsoEngine)
 
-# set (CMAKE_CXX_STANDARD 17)
-
 set_property( GLOBAL PROPERTY USE_FOLDERS ON )
+
+file(GLOB ENGINE_SOURCE_FILES
+    "source/*.cpp"
+    "source/*.h"
+)
 
 if (MSVC)
 	# remove default warning level from CMAKE_CXX_FLAGS_INIT
@@ -30,7 +33,7 @@ endif()
 include_directories(AFTER ${VULKAN_PATH}/Include)
 include_directories(${glfw3_INCLUDE_DIR})
 
-add_executable(AlphonsoEngine source/main.cpp)
+add_executable(AlphonsoEngine ${ENGINE_SOURCE_FILES})
 
 target_compile_definitions(AlphonsoEngine PRIVATE VK_USE_PLATFORM_WIN32_KHR)
 

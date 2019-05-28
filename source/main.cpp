@@ -8,6 +8,8 @@
 
 #include <iostream>
 
+//using namespace AlphonsoGraphicsEngine;
+
 int main() {
 	glfwInit();
 

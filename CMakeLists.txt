@@ -22,6 +22,7 @@ endif()
 
 find_package(Vulkan REQUIRED)
 find_package(glfw3 3.3 REQUIRED)
+find_package(OpenGL REQUIRED)
 
 # Try extracting VulkanSDK path from ${Vulkan_INCLUDE_DIRS}
 if (NOT ${Vulkan_INCLUDE_DIRS} STREQUAL "")
@@ -32,10 +33,11 @@ endif()
 # Include Header files for Vulkan and GLFW3
 include_directories(AFTER ${VULKAN_PATH}/Include)
 include_directories(${glfw3_INCLUDE_DIR})
+include_directories(${OPENGL_INCLUDE_DIR})
 
 add_executable(AlphonsoEngine ${ENGINE_SOURCE_FILES})
 
 target_compile_definitions(AlphonsoEngine PRIVATE VK_USE_PLATFORM_WIN32_KHR)
 
-target_link_libraries(AlphonsoEngine Vulkan::Vulkan glfw)
+target_link_libraries(AlphonsoEngine Vulkan::Vulkan glfw opengl32)
 

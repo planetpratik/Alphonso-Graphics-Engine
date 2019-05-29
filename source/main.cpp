@@ -1,37 +1,30 @@
-#include <vulkan/vulkan.h>
-//#define GLFW_INCLUDE_VULKAN
-#include <GLFW/glfw3.h>
-#define GLM_FORCE_RADIANS
-#define GLM_FORCE_DEPTH_ZERO_TO_ONE
-#include <glm/vec4.hpp>
-#include <glm/mat4x4.hpp>
-
 #include <iostream>
+#include "Renderer.h"
 
-//using namespace AlphonsoGraphicsEngine;
+#if defined(DEBUG) || defined(_DEBUG)
+#define _CRTDBG_MAP_ALLOC
+#include <stdlib.h>
+#include <crtdbg.h>
+#endif
 
-int main() {
-	glfwInit();
+using namespace AlphonsoGraphicsEngine;
 
-	glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-	GLFWwindow* window = glfwCreateWindow(800, 600, "Vulkan window", nullptr, nullptr);
+int main() 
+{
+	// Code for Memory Leak Detection.
+#if defined(DEBUG) | defined(_DEBUG)
+	_CrtSetDbgFlag(_CRTDBG_ALLOC_MEM_DF | _CRTDBG_LEAK_CHECK_DF);
+#endif
 
-	uint32_t extensionCount = 0;
-	vkEnumerateInstanceExtensionProperties(nullptr, &extensionCount, nullptr);
-
-	std::cout << extensionCount << " extensions supported" << std::endl;
-
-	/*glm::mat4 matrix;
-	glm::vec4 vec;
-	auto test = matrix * vec;*/
-
-	while (!glfwWindowShouldClose(window)) {
-		glfwPollEvents();
+	Renderer renderer;
+	try
+	{
+		renderer.Run();
 	}
-
-	glfwDestroyWindow(window);
-
-	glfwTerminate();
-
-	return 0;
+	catch (const std::exception& error)
+	{
+		std::cerr << error.what() << std::endl;
+		return EXIT_FAILURE;
+	}
+	return EXIT_SUCCESS;
 }

@@ -62,6 +62,8 @@ namespace AlphonsoGraphicsEngine
 		bool CheckValidationLayers(std::vector<const char*>const& layers, std::vector<vk::LayerProperties> const& properties);
 		void CreateDebugCallbacksForValidationLayers();
 		void CreateVulkanInstance();
+		void SelectPhysicalDevice();
+		void CreateLogicalDevice();
 
 		GameClock mGameClock;
 		GameTime mGameTime;
@@ -75,7 +77,11 @@ namespace AlphonsoGraphicsEngine
 	private:
 		GLFWwindow* mWindow = nullptr;
 		vk::UniqueInstance mVulkanInstance;
+		vk::UniqueHandle<vk::Device, vk::DispatchLoaderDynamic> mDevice;
+		vk::DispatchLoaderDynamic DispatchLoaderDynamic;
 		std::vector<vk::LayerProperties> mInstanceLayerProperties;
+		std::vector<vk::PhysicalDevice> mPhysicalDevices;
+		std::vector<vk::QueueFamilyProperties> mQueueFamilyProperties;
 	};
 
 	static PFN_vkCreateDebugReportCallbackEXT  mPFN_vkCreateDebugReportCallbackEXT;

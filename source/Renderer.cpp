@@ -64,6 +64,9 @@ namespace AlphonsoGraphicsEngine
 	{
 		CreateVulkanInstance();
 		CreateDebugCallbacksForValidationLayers();
+		SelectPhysicalDevice();
+		CreateLogicalDevice();
+
 	}
 
 	void Renderer::Shutdown()
@@ -103,6 +106,41 @@ namespace AlphonsoGraphicsEngine
 		mVulkanInstance = vk::createInstanceUnique(instanceInfo);
 	}
 
+	void Renderer::SelectPhysicalDevice()
+	{
+		// Enumerate on Physical Devices
+		mPhysicalDevices = mVulkanInstance->enumeratePhysicalDevices();
+		if (mPhysicalDevices.size() == 0)
+		{
+			throw std::runtime_error("There is no GPU supporting Vulkan API!");
+		}
+		// Get QueueFamilyProperties of  first Physical Device
+		mQueueFamilyProperties = mPhysicalDevices[0].getQueueFamilyProperties();
+	}
+
+	void Renderer::CreateLogicalDevice()
+	{
+		// Get First occurence of any Queue supporting Graphics Bits
+		// std::find_if gives first element for which predicate returns true.
+		size_t graphicsQueueFamilyIndex = std::distance(mQueueFamilyProperties.begin(),
+			std::find_if(mQueueFamilyProperties.begin(),
+				mQueueFamilyProperties.end(),
+				[](vk::QueueFamilyProperties const& queueFamilyProperties)
+				{ return queueFamilyProperties.queueFlags & vk::QueueFlagBits::eGraphics; }));
+
+		// Create a Unique Device. It doesn't need to be explicitly destroyed.
+		float queuePriority = 0.0f;
+		vk::DeviceQueueCreateInfo deviceQueueCreateInfo(
+			vk::DeviceQueueCreateFlags(),
+			graphicsQueueFamilyIndex,
+			1,
+			&queuePriority
+		);
+
+		mDevice = mPhysicalDevices[0].createDeviceUnique(vk::DeviceCreateInfo(
+			vk::DeviceCreateFlags(), 1, &deviceQueueCreateInfo), nullptr, DispatchLoaderDynamic);
+	}
+
 	std::vector<const char*> Renderer::GetRequiredExtensions()
 	{
 		uint32_t glfwExtensionCount = 0;
@@ -126,7 +164,7 @@ namespace AlphonsoGraphicsEngine
 	// We need to Create Dynamic Dispatch Loader & pass it as a last argument to EXT functions.
 	void Renderer::CreateDebugCallbacksForValidationLayers()
 	{
-		vk::DispatchLoaderDynamic DispatchLoaderDynamic(*mVulkanInstance);
+		DispatchLoaderDynamic = *mVulkanInstance;
 		mPFN_vkCreateDebugReportCallbackEXT = reinterpret_cast<PFN_vkCreateDebugReportCallbackEXT>(mVulkanInstance->getProcAddr("vkCreateDebugReportCallbackEXT"));
 		if (!mPFN_vkCreateDebugReportCallbackEXT)
 		{

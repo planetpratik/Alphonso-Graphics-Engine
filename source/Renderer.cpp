@@ -1,8 +1,54 @@
 #include "Renderer.h"
+#include <iostream>
+#include <sstream>
 #include <GL/gl.h>
+
 
 namespace AlphonsoGraphicsEngine
 {
+	VKAPI_ATTR VkResult VKAPI_CALL vkCreateDebugReportCallbackEXT(VkInstance instance, const VkDebugReportCallbackCreateInfoEXT* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkDebugReportCallbackEXT* pCallback)
+	{
+		return mPFN_vkCreateDebugReportCallbackEXT(instance, pCreateInfo, pAllocator, pCallback);
+	}
+
+	VKAPI_ATTR void VKAPI_CALL vkDestroyDebugReportCallbackEXT(VkInstance instance, VkDebugReportCallbackEXT callback, const VkAllocationCallbacks* pAllocator)
+	{
+		mPFN_vkDestroyDebugReportCallbackEXT(instance, callback, pAllocator);
+	}
+
+	// This Debug Function is copied from Vulkan-HPP's official documentation page.
+	static VKAPI_ATTR VkBool32 VKAPI_CALL DebugFunction(VkDebugReportFlagsEXT flags, VkDebugReportObjectTypeEXT /*objType*/, uint64_t /*srcObject*/, size_t /*location*/, int32_t msgCode, const char* pLayerPrefix, const char* pMsg, void* /*pUserData*/)
+	{
+		std::ostringstream message;
+
+		switch (flags)
+		{
+		case VK_DEBUG_REPORT_INFORMATION_BIT_EXT:
+			message << "INFORMATION: ";
+			break;
+		case VK_DEBUG_REPORT_WARNING_BIT_EXT:
+			message << "WARNING: ";
+			break;
+		case VK_DEBUG_REPORT_PERFORMANCE_WARNING_BIT_EXT:
+			message << "PERFORMANCE WARNING: ";
+			break;
+		case VK_DEBUG_REPORT_ERROR_BIT_EXT:
+			message << "ERROR: ";
+			break;
+		case VK_DEBUG_REPORT_DEBUG_BIT_EXT:
+			message << "DEBUG: ";
+			break;
+		default:
+			message << "Unknown Flag (" << flags << "): ";
+			break;
+		}
+		message << "[" << pLayerPrefix << "] Code " << msgCode << " : " << pMsg;
+
+		MessageBox(NULL, message.str().c_str(), "Alert", MB_OK);
+		return VK_FALSE;
+	}
+
+
 	void Renderer::InitializeWindow()
 	{
 		glfwInit();
@@ -17,6 +63,7 @@ namespace AlphonsoGraphicsEngine
 	void Renderer::InitializeVulkan()
 	{
 		CreateVulkanInstance();
+		CreateDebugCallbacksForValidationLayers();
 	}
 
 	void Renderer::Shutdown()
@@ -27,6 +74,13 @@ namespace AlphonsoGraphicsEngine
 
 	void Renderer::CreateVulkanInstance()
 	{
+		// Returns implicitly enabled layers.
+		 mInstanceLayerProperties = vk::enumerateInstanceLayerProperties();
+		 if(!CheckValidationLayers(mValidationLayers, mInstanceLayerProperties))
+		 {
+			 std::cout << "Set the environment variable VK_LAYER_PATH to point to the location of your layers" << std::endl;
+			 exit(1);
+		 }
 		// Create application & Instance Information.
 		vk::ApplicationInfo applicationInfo(
 			"Alphonso Engine - Vulkan",
@@ -34,18 +88,61 @@ namespace AlphonsoGraphicsEngine
 			"Vulkan-HPP",
 			VK_MAKE_VERSION(1, 0, 0),
 			VK_API_VERSION_1_1);
-		vk::InstanceCreateInfo instanceInfo({}, &applicationInfo);
-		
-		uint32_t glfwExtensionCount = 0;
-		auto glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
-		instanceInfo.enabledExtensionCount = glfwExtensionCount;
-		instanceInfo.ppEnabledExtensionNames = glfwExtensions;
-		instanceInfo.enabledLayerCount = 0;
 
+		mInstanceExtensionNames = GetRequiredExtensions();
+
+		vk::InstanceCreateInfo instanceInfo(
+			vk::InstanceCreateFlags(),
+			&applicationInfo,
+			mValidationLayers.size(),
+			mValidationLayers.data(),
+			mInstanceExtensionNames.size(),
+			mInstanceExtensionNames.data());
+		
 		// Create Unique instance. Being UniqueInstance, it doesn't need to be explicitly destroyed.
-		mVulkanInstance = vk::createInstanceUnique(instanceInfo);
+		mVulkanInstance = vk::createInstance(instanceInfo);
 	}
 
+	std::vector<const char*> Renderer::GetRequiredExtensions()
+	{
+		uint32_t glfwExtensionCount = 0;
+		auto glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
+		std::vector<const char*> allExtensions(glfwExtensions, glfwExtensions + glfwExtensionCount);
+		// "VK_EXT_debug_report" has been decrepated so using newer "VK_EXT_debug_utils" instead.
+		allExtensions.push_back("VK_EXT_debug_report");
+		return allExtensions;
+	}
+
+	bool Renderer::CheckValidationLayers(std::vector<const char*> const& layers, std::vector<vk::LayerProperties> const& properties)
+	{
+		return std::all_of(layers.begin(), layers.end(), [&properties](const char* name)
+			{
+				return std::find_if(properties.begin(), properties.end(), [&name](vk::LayerProperties const& property) {
+					return strcmp(property.layerName, name) == 0;
+					}) != properties.end();
+			});
+	}
+
+	// To use any Extension functions ( Suffixed with EXT ), we can't use Static Loaders.
+	// We need to Create Dynamic Dispatch Loader & pass it as a last argument to EXT functions.
+	void Renderer::CreateDebugCallbacksForValidationLayers()
+	{
+		vk::DispatchLoaderDynamic DispatchLoaderDynamic(mVulkanInstance);
+		mPFN_vkCreateDebugReportCallbackEXT = reinterpret_cast<PFN_vkCreateDebugReportCallbackEXT>(mVulkanInstance.getProcAddr("vkCreateDebugReportCallbackEXT"));
+		if (!mPFN_vkCreateDebugReportCallbackEXT)
+		{
+			std::cout << "GetInstanceProcAddr: Unable to find vkCreateDebugReportCallbackEXT function." << std::endl;
+			exit(1);
+		}
+		mPFN_vkDestroyDebugReportCallbackEXT = reinterpret_cast<PFN_vkDestroyDebugReportCallbackEXT>(mVulkanInstance.getProcAddr("vkDestroyDebugReportCallbackEXT"));
+		if (!mPFN_vkDestroyDebugReportCallbackEXT)
+		{
+			std::cout << "GetInstanceProcAddr: Unable to find vkDestroyDebugReportCallbackEXT function." << std::endl;
+			exit(1);
+		}
+		// We are passing Dynamic Loader as a last parameter ( Which is optional if we aren't using Extensions )
+		mDebugReportCallback = mVulkanInstance.createDebugReportCallbackEXT(vk::DebugReportCallbackCreateInfoEXT(vk::DebugReportFlagBitsEXT::eError | vk::DebugReportFlagBitsEXT::eWarning, DebugFunction), nullptr, DispatchLoaderDynamic);
+	}
 	Renderer::Renderer()
 	{
 		Initialize();

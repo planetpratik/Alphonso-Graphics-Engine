@@ -1,4 +1,5 @@
 #pragma once
+
 // This line is very important to compile code for 32-bit platforms Without adding explicit casts 
 // As Vulkan-Hpp does not enable implicit conversion for 32-bit platforms by default.
 #define  VULKAN_HPP_TYPESAFE_CONVERSION 1
@@ -52,19 +53,36 @@ namespace AlphonsoGraphicsEngine
 		/// <summary>This method handles all Draw Calls. ( Virtual ).</summary>
 		/// <param name="gameTime">Const reference to passed GameTime.</param>
 		virtual void Draw(const GameTime& gameTime);
+
+		/*VKAPI_ATTR VkResult VKAPI_CALL vkCreateDebugReportCallbackEXT(vk::Instance instance, const VkDebugReportCallbackCreateInfoEXT* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkDebugReportCallbackEXT* pCallback);
+		VKAPI_ATTR void VKAPI_CALL vkDestroyDebugReportCallbackEXT(vk::Instance instance, VkDebugReportCallbackEXT callback, const VkAllocationCallbacks* pAllocator);
+		VKAPI_ATTR VkBool32 VKAPI_CALL DebugFunction(VkDebugReportFlagsEXT flags, VkDebugReportObjectTypeEXT objType, uint64_t srcObject, size_t location, int32_t msgCode, const char* pLayerPrefix, const char* pMsg, void* pUserData);*/
 	protected:
 		virtual void InitializeWindow();
 		virtual void InitializeVulkan();
 		virtual void Shutdown();
 		void CreateVulkanInstance();
-
+		std::vector<const char*> GetRequiredExtensions();
+		bool CheckValidationLayers(std::vector<const char*>const& layers, std::vector<vk::LayerProperties> const& properties);
+		
+		void CreateDebugCallbacksForValidationLayers();
+		
 		GameClock mGameClock;
 		GameTime mGameTime;
 
 		static const int DefaultScreenWidth = 1024;
 		static const int DefaultScreenHeight = 768;
+		const std::vector<const char*> mValidationLayers = {
+			"VK_LAYER_KHRONOS_validation"
+		};
+		std::vector<const char*> mInstanceExtensionNames;
 	private:
 		GLFWwindow* mWindow = nullptr;
-		vk::UniqueInstance mVulkanInstance;
+		vk::Instance mVulkanInstance;
+		std::vector<vk::LayerProperties> mInstanceLayerProperties;
+		vk::DebugReportCallbackEXT mDebugReportCallback;
 	};
+
+	static PFN_vkCreateDebugReportCallbackEXT  mPFN_vkCreateDebugReportCallbackEXT;
+	static PFN_vkDestroyDebugReportCallbackEXT mPFN_vkDestroyDebugReportCallbackEXT;
 }

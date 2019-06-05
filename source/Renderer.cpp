@@ -99,8 +99,8 @@ namespace AlphonsoGraphicsEngine
 			mInstanceExtensionNames.size(),
 			mInstanceExtensionNames.data());
 		
-		// Create Unique instance. Being UniqueInstance, it doesn't need to be explicitly destroyed.
-		mVulkanInstance = vk::createInstance(instanceInfo);
+		// Using Unique instance. Being UniqueInstance, it doesn't need to be explicitly destroyed.
+		mVulkanInstance = vk::createInstanceUnique(instanceInfo);
 	}
 
 	std::vector<const char*> Renderer::GetRequiredExtensions()
@@ -108,7 +108,6 @@ namespace AlphonsoGraphicsEngine
 		uint32_t glfwExtensionCount = 0;
 		auto glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
 		std::vector<const char*> allExtensions(glfwExtensions, glfwExtensions + glfwExtensionCount);
-		// "VK_EXT_debug_report" has been decrepated so using newer "VK_EXT_debug_utils" instead.
 		allExtensions.push_back("VK_EXT_debug_report");
 		return allExtensions;
 	}
@@ -127,22 +126,23 @@ namespace AlphonsoGraphicsEngine
 	// We need to Create Dynamic Dispatch Loader & pass it as a last argument to EXT functions.
 	void Renderer::CreateDebugCallbacksForValidationLayers()
 	{
-		vk::DispatchLoaderDynamic DispatchLoaderDynamic(mVulkanInstance);
-		mPFN_vkCreateDebugReportCallbackEXT = reinterpret_cast<PFN_vkCreateDebugReportCallbackEXT>(mVulkanInstance.getProcAddr("vkCreateDebugReportCallbackEXT"));
+		vk::DispatchLoaderDynamic DispatchLoaderDynamic(*mVulkanInstance);
+		mPFN_vkCreateDebugReportCallbackEXT = reinterpret_cast<PFN_vkCreateDebugReportCallbackEXT>(mVulkanInstance->getProcAddr("vkCreateDebugReportCallbackEXT"));
 		if (!mPFN_vkCreateDebugReportCallbackEXT)
 		{
 			std::cout << "GetInstanceProcAddr: Unable to find vkCreateDebugReportCallbackEXT function." << std::endl;
 			exit(1);
 		}
-		mPFN_vkDestroyDebugReportCallbackEXT = reinterpret_cast<PFN_vkDestroyDebugReportCallbackEXT>(mVulkanInstance.getProcAddr("vkDestroyDebugReportCallbackEXT"));
+		mPFN_vkDestroyDebugReportCallbackEXT = reinterpret_cast<PFN_vkDestroyDebugReportCallbackEXT>(mVulkanInstance->getProcAddr("vkDestroyDebugReportCallbackEXT"));
 		if (!mPFN_vkDestroyDebugReportCallbackEXT)
 		{
 			std::cout << "GetInstanceProcAddr: Unable to find vkDestroyDebugReportCallbackEXT function." << std::endl;
 			exit(1);
 		}
 		// We are passing Dynamic Loader as a last parameter ( Which is optional if we aren't using Extensions )
-		mDebugReportCallback = mVulkanInstance.createDebugReportCallbackEXT(vk::DebugReportCallbackCreateInfoEXT(vk::DebugReportFlagBitsEXT::eError | vk::DebugReportFlagBitsEXT::eWarning, DebugFunction), nullptr, DispatchLoaderDynamic);
+		auto mDebugReportCallback = mVulkanInstance->createDebugReportCallbackEXTUnique(vk::DebugReportCallbackCreateInfoEXT(vk::DebugReportFlagBitsEXT::eError | vk::DebugReportFlagBitsEXT::eWarning, DebugFunction), nullptr, DispatchLoaderDynamic);
 	}
+
 	Renderer::Renderer()
 	{
 		Initialize();

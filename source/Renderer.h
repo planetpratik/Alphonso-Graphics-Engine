@@ -60,8 +60,9 @@ namespace AlphonsoGraphicsEngine
 
 		std::vector<const char*> GetRequiredExtensions();
 		bool CheckValidationLayers(std::vector<const char*>const& layers, std::vector<vk::LayerProperties> const& properties);
-		void CreateDebugCallbacksForValidationLayers();
 		void CreateVulkanInstance();
+		void CreateDebugCallbacksForValidationLayers();
+		void CreateWindowSurface();
 		void SelectPhysicalDevice();
 		void CreateLogicalDevice();
 
@@ -79,6 +80,9 @@ namespace AlphonsoGraphicsEngine
 		vk::UniqueInstance mVulkanInstance;
 		vk::UniqueHandle<vk::Device, vk::DispatchLoaderDynamic> mDevice;
 		vk::DispatchLoaderDynamic DispatchLoaderDynamic;
+		//vk::UniqueSurfaceKHR mSurface;
+		size_t graphicsQueueFamilyIndex = 0;
+		size_t presentQueueFamilyIndex = 0;
 		std::vector<vk::LayerProperties> mInstanceLayerProperties;
 		std::vector<vk::PhysicalDevice> mPhysicalDevices;
 		std::vector<vk::QueueFamilyProperties> mQueueFamilyProperties;

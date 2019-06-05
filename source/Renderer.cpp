@@ -64,9 +64,9 @@ namespace AlphonsoGraphicsEngine
 	{
 		CreateVulkanInstance();
 		CreateDebugCallbacksForValidationLayers();
+		CreateWindowSurface();
 		SelectPhysicalDevice();
 		CreateLogicalDevice();
-
 	}
 
 	void Renderer::Shutdown()
@@ -122,7 +122,7 @@ namespace AlphonsoGraphicsEngine
 	{
 		// Get First occurence of any Queue supporting Graphics Bits
 		// std::find_if gives first element for which predicate returns true.
-		size_t graphicsQueueFamilyIndex = std::distance(mQueueFamilyProperties.begin(),
+		graphicsQueueFamilyIndex = std::distance(mQueueFamilyProperties.begin(),
 			std::find_if(mQueueFamilyProperties.begin(),
 				mQueueFamilyProperties.end(),
 				[](vk::QueueFamilyProperties const& queueFamilyProperties)
@@ -179,6 +179,28 @@ namespace AlphonsoGraphicsEngine
 		}
 		// We are passing Dynamic Loader as a last parameter ( Which is optional if we aren't using Extensions )
 		auto mDebugReportCallback = mVulkanInstance->createDebugReportCallbackEXTUnique(vk::DebugReportCallbackCreateInfoEXT(vk::DebugReportFlagBitsEXT::eError | vk::DebugReportFlagBitsEXT::eWarning, DebugFunction), nullptr, DispatchLoaderDynamic);
+	}
+
+	void Renderer::CreateWindowSurface()
+	{
+		VkSurfaceKHR surface;
+		VkResult result = glfwCreateWindowSurface(*mVulkanInstance, mWindow, nullptr, &surface);
+		if (result != VK_SUCCESS)
+		{
+			throw std::runtime_error("Failed to Create Windows surface!");
+		}
+		vk::UniqueSurfaceKHR mSurface(surface, *mVulkanInstance);
+
+		// Iterate over each queue to learn whether it supports presenting.
+		// Find a queue with present support
+		// It Will be used to present the swap chain images to the windowing system
+		for (size_t i = 0; i < mQueueFamilyProperties.size(); ++i)
+		{
+			if (mPhysicalDevices[0].getSurfaceSupportKHR(i, mSurface.get()))
+			{
+				presentQueueFamilyIndex = i;
+			}
+		}
 	}
 
 	Renderer::Renderer()

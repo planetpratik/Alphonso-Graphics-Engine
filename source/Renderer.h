@@ -92,7 +92,6 @@ namespace AlphonsoGraphicsEngine
 		size_t graphicsQueueFamilyIndex = 0;
 		size_t presentQueueFamilyIndex = 0;
 		vk::UniqueSwapchainKHR mSwapChain;
-		std::vector<vk::Image> mSwapChainImages;
 		vk::Format mSwapChainImageFormat;
 		vk::Extent2D mSwapChainExtent;
 		vk::SwapchainCreateInfoKHR mSwapChainCreateInfo;
@@ -102,6 +101,8 @@ namespace AlphonsoGraphicsEngine
 		std::vector<vk::QueueFamilyProperties> mQueueFamilyProperties;
 		std::vector<vk::DeviceQueueCreateInfo> mdeviceQueueCreateInfo;
 		std::vector<uint32_t> mFamilyIndices;
+		std::vector<vk::Image> mSwapChainImages;
+		std::vector<vk::UniqueImageView> mImageViews;
 	};
 
 	static PFN_vkCreateDebugReportCallbackEXT  mPFN_vkCreateDebugReportCallbackEXT;

@@ -199,6 +199,15 @@ namespace AlphonsoGraphicsEngine
 
 	void Renderer::CreateImageViews()
 	{
+		mImageViews.reserve(mSwapChainImages.size());
+		for (auto image : mSwapChainImages) {
+			vk::ImageViewCreateInfo imageViewCreateInfo(vk::ImageViewCreateFlags(), image,
+				vk::ImageViewType::e2D, mSwapChainImageFormat,
+				vk::ComponentMapping{ vk::ComponentSwizzle::eR, vk::ComponentSwizzle::eG,
+					vk::ComponentSwizzle::eB, vk::ComponentSwizzle::eA },
+				vk::ImageSubresourceRange{ vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1 });
+			mImageViews.push_back(mDevice->createImageViewUnique(imageViewCreateInfo));
+		}
 	}
 
 	void Renderer::CreateRenderPass()

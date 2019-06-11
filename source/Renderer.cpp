@@ -106,6 +106,28 @@ namespace AlphonsoGraphicsEngine
 		mVulkanInstance = vk::createInstanceUnique(instanceInfo);
 	}
 
+	void Renderer::CreateWindowSurface()
+	{
+		VkResult result = glfwCreateWindowSurface(*mVulkanInstance, mWindow, nullptr, &surface);
+		if (result != VK_SUCCESS)
+		{
+			throw std::runtime_error("Failed to Create Windows surface!");
+		}
+
+		mSurface = vk::UniqueSurfaceKHR(surface, *mVulkanInstance);
+
+		// Iterate over each queue to learn whether it supports presenting.
+		// Find a queue with present support
+		// It Will be used to present the swap chain images to the windowing system
+		for (size_t i = 0; i < mQueueFamilyProperties.size(); ++i)
+		{
+			if (mPhysicalDevices[0].getSurfaceSupportKHR(i, mSurface.get()))
+			{
+				presentQueueFamilyIndex = i;
+			}
+		}
+	}
+
 	void Renderer::SelectPhysicalDevice()
 	{
 		// Enumerate on Physical Devices
@@ -128,17 +150,59 @@ namespace AlphonsoGraphicsEngine
 				[](vk::QueueFamilyProperties const& queueFamilyProperties)
 				{ return queueFamilyProperties.queueFlags & vk::QueueFlagBits::eGraphics; }));
 
+		uniqueQueueFamilyIndices = { graphicsQueueFamilyIndex, presentQueueFamilyIndex };
+
+		mFamilyIndices = { uniqueQueueFamilyIndices.begin(), uniqueQueueFamilyIndices.end() };
+
 		// Create a Unique Device. It doesn't need to be explicitly destroyed.
 		float queuePriority = 0.0f;
-		vk::DeviceQueueCreateInfo deviceQueueCreateInfo(
-			vk::DeviceQueueCreateFlags(),
-			graphicsQueueFamilyIndex,
-			1,
-			&queuePriority
-		);
+		for (int queueFamilyIndex : uniqueQueueFamilyIndices)
+		{
+			mdeviceQueueCreateInfo.push_back(vk::DeviceQueueCreateInfo{ vk::DeviceQueueCreateFlags(),
+				static_cast<uint32_t>(queueFamilyIndex), 1, &queuePriority });
+		}
 
 		mDevice = mPhysicalDevices[0].createDeviceUnique(vk::DeviceCreateInfo(
-			vk::DeviceCreateFlags(), 1, &deviceQueueCreateInfo), nullptr, DispatchLoaderDynamic);
+			vk::DeviceCreateFlags(), mdeviceQueueCreateInfo.size(), mdeviceQueueCreateInfo.data(), 0, nullptr, mdeviceExtensions.size(), mdeviceExtensions.data()),
+			nullptr, DispatchLoaderDynamic);
+	}
+
+	void Renderer::CreateSwapChain()
+	{
+		struct SM {
+			vk::SharingMode sharingMode;
+			uint32_t familyIndicesCount;
+			uint32_t* familyIndicesDataPtr;
+		} sharingModeUtil{ (graphicsQueueFamilyIndex != presentQueueFamilyIndex) ?
+							   SM{ vk::SharingMode::eConcurrent, 2u, mFamilyIndices.data() } : SM{ vk::SharingMode::eExclusive, 0u, static_cast<uint32_t*>(nullptr) } };
+		
+		auto capabilities = mPhysicalDevices[0].getSurfaceCapabilitiesKHR(*mSurface);
+		auto formats = mPhysicalDevices[0].getSurfaceFormatsKHR(*mSurface);
+
+		mSwapChainImageFormat = vk::Format::eB8G8R8A8Unorm;
+		mSwapChainExtent = vk::Extent2D{ DefaultScreenWidth, DefaultScreenHeight };
+
+		uint32_t imageCount = capabilities.minImageCount + 1;
+		if (capabilities.maxImageCount > 0 && imageCount > capabilities.maxImageCount) {
+			imageCount = capabilities.maxImageCount;
+		}
+
+		mSwapChainCreateInfo = vk::SwapchainCreateInfoKHR({}, mSurface.get(), imageCount, mSwapChainImageFormat,
+			vk::ColorSpaceKHR::eSrgbNonlinear, mSwapChainExtent, 1, vk::ImageUsageFlagBits::eColorAttachment,
+			sharingModeUtil.sharingMode, sharingModeUtil.familyIndicesCount,
+			sharingModeUtil.familyIndicesDataPtr, vk::SurfaceTransformFlagBitsKHR::eIdentity,
+			vk::CompositeAlphaFlagBitsKHR::eOpaque, vk::PresentModeKHR::eFifo, true, nullptr);
+
+		mSwapChain = mDevice->createSwapchainKHRUnique(mSwapChainCreateInfo);
+		mSwapChainImages = mDevice->getSwapchainImagesKHR(mSwapChain.get());
+	}
+
+	void Renderer::CreateImageViews()
+	{
+	}
+
+	void Renderer::CreateRenderPass()
+	{
 	}
 
 	std::vector<const char*> Renderer::GetRequiredExtensions()
@@ -179,28 +243,6 @@ namespace AlphonsoGraphicsEngine
 		}
 		// We are passing Dynamic Loader as a last parameter ( Which is optional if we aren't using Extensions )
 		auto mDebugReportCallback = mVulkanInstance->createDebugReportCallbackEXTUnique(vk::DebugReportCallbackCreateInfoEXT(vk::DebugReportFlagBitsEXT::eError | vk::DebugReportFlagBitsEXT::eWarning, DebugFunction), nullptr, DispatchLoaderDynamic);
-	}
-
-	void Renderer::CreateWindowSurface()
-	{
-		VkSurfaceKHR surface;
-		VkResult result = glfwCreateWindowSurface(*mVulkanInstance, mWindow, nullptr, &surface);
-		if (result != VK_SUCCESS)
-		{
-			throw std::runtime_error("Failed to Create Windows surface!");
-		}
-		vk::UniqueSurfaceKHR mSurface(surface, *mVulkanInstance);
-
-		// Iterate over each queue to learn whether it supports presenting.
-		// Find a queue with present support
-		// It Will be used to present the swap chain images to the windowing system
-		for (size_t i = 0; i < mQueueFamilyProperties.size(); ++i)
-		{
-			if (mPhysicalDevices[0].getSurfaceSupportKHR(i, mSurface.get()))
-			{
-				presentQueueFamilyIndex = i;
-			}
-		}
 	}
 
 	Renderer::Renderer()

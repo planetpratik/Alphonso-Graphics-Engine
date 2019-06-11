@@ -4,6 +4,7 @@
 #define  VULKAN_HPP_TYPESAFE_CONVERSION 1
 #include <vulkan/vulkan.hpp>
 #include <GLFW/glfw3.h>
+#include <set>
 #include "GameClock.h"
 #include "GameTime.h"
 
@@ -65,6 +66,9 @@ namespace AlphonsoGraphicsEngine
 		void CreateWindowSurface();
 		void SelectPhysicalDevice();
 		void CreateLogicalDevice();
+		void CreateSwapChain();
+		void CreateImageViews();
+		void CreateRenderPass();
 
 		GameClock mGameClock;
 		GameTime mGameTime;
@@ -74,18 +78,30 @@ namespace AlphonsoGraphicsEngine
 		const std::vector<const char*> mValidationLayers = {
 			"VK_LAYER_KHRONOS_validation"
 		};
+		const std::vector<const char*> mdeviceExtensions = { 
+			"VK_KHR_swapchain"
+		};
 		std::vector<const char*> mInstanceExtensionNames;
 	private:
 		GLFWwindow* mWindow = nullptr;
 		vk::UniqueInstance mVulkanInstance;
 		vk::UniqueHandle<vk::Device, vk::DispatchLoaderDynamic> mDevice;
 		vk::DispatchLoaderDynamic DispatchLoaderDynamic;
-		//vk::UniqueSurfaceKHR mSurface;
+		VkSurfaceKHR surface;
+		vk::UniqueSurfaceKHR mSurface;
 		size_t graphicsQueueFamilyIndex = 0;
 		size_t presentQueueFamilyIndex = 0;
+		vk::UniqueSwapchainKHR mSwapChain;
+		std::vector<vk::Image> mSwapChainImages;
+		vk::Format mSwapChainImageFormat;
+		vk::Extent2D mSwapChainExtent;
+		vk::SwapchainCreateInfoKHR mSwapChainCreateInfo;
+		std::set<size_t> uniqueQueueFamilyIndices;
 		std::vector<vk::LayerProperties> mInstanceLayerProperties;
 		std::vector<vk::PhysicalDevice> mPhysicalDevices;
 		std::vector<vk::QueueFamilyProperties> mQueueFamilyProperties;
+		std::vector<vk::DeviceQueueCreateInfo> mdeviceQueueCreateInfo;
+		std::vector<uint32_t> mFamilyIndices;
 	};
 
 	static PFN_vkCreateDebugReportCallbackEXT  mPFN_vkCreateDebugReportCallbackEXT;

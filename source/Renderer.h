@@ -76,6 +76,7 @@ namespace AlphonsoGraphicsEngine
 		void CreateFramebuffers();
 		void CreateCommandPool();
 		void CreateCommandBuffers();
+		void CreateSemaphores();
 
 		GameClock mGameClock;
 		GameTime mGameTime;
@@ -111,6 +112,8 @@ namespace AlphonsoGraphicsEngine
 		vk::UniqueHandle<vk::RenderPass, vk::DispatchLoaderDynamic> mRenderPass;
 		vk::UniqueHandle<vk::Pipeline, vk::DispatchLoaderDynamic> mPipeline;
 		vk::UniqueHandle<vk::CommandPool, vk::DispatchLoaderDynamic> mCommandPool;
+		vk::UniqueHandle<vk::Semaphore, vk::DispatchLoaderDynamic> mImageAvailableSemaphore;
+		vk::UniqueHandle<vk::Semaphore, vk::DispatchLoaderDynamic> mRenderFinishedSemaphore;
 
 		std::set<size_t> uniqueQueueFamilyIndices;
 		std::vector<vk::LayerProperties> mInstanceLayerProperties;

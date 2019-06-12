@@ -4,6 +4,7 @@
 #include <sstream>
 #include <GL/gl.h>
 #include <shaderc/shaderc.hpp>
+#include <limits>
 
 using namespace std::string_literals;
 
@@ -78,6 +79,7 @@ namespace AlphonsoGraphicsEngine
 		CreateFramebuffers();
 		CreateCommandPool();
 		CreateCommandBuffers();
+		CreateSemaphores();
 	}
 
 	void Renderer::Shutdown()
@@ -354,10 +356,6 @@ namespace AlphonsoGraphicsEngine
 
 		auto pipelineLayout = mDevice->createPipelineLayoutUnique({}, nullptr, DispatchLoaderDynamic);
 
-		auto semaphoreCreateInfo = vk::SemaphoreCreateInfo{};
-		auto imageAvailableSemaphore = mDevice->createSemaphoreUnique(semaphoreCreateInfo, nullptr, DispatchLoaderDynamic);
-		auto renderFinishedSemaphore = mDevice->createSemaphoreUnique(semaphoreCreateInfo, nullptr, DispatchLoaderDynamic);
-
 		auto pipelineCreateInfo = vk::GraphicsPipelineCreateInfo{ {}, 2, pipelineShaderStages.data(),
 			&vertexInputInfo, &inputAssembly, nullptr, &viewportState, &rasterizer, &multisampling,
 			nullptr, &colorBlending, nullptr, *pipelineLayout, *mRenderPass, 0 };
@@ -412,6 +410,13 @@ namespace AlphonsoGraphicsEngine
 			mCommandBuffers[i]->endRenderPass();
 			mCommandBuffers[i]->end();
 		}
+	}
+
+	void Renderer::CreateSemaphores()
+	{
+		auto semaphoreCreateInfo = vk::SemaphoreCreateInfo{};
+		mImageAvailableSemaphore = mDevice->createSemaphoreUnique(semaphoreCreateInfo, nullptr, DispatchLoaderDynamic);
+		mRenderFinishedSemaphore = mDevice->createSemaphoreUnique(semaphoreCreateInfo, nullptr, DispatchLoaderDynamic);
 	}
 	
 	std::vector<const char*> Renderer::GetRequiredExtensions()
@@ -486,7 +491,22 @@ namespace AlphonsoGraphicsEngine
 
 	void Renderer::Draw(const GameTime& gameTime)
 	{
-		gameTime;
+		UNREFERENCED_PARAMETER(gameTime);
+		auto imageIndex = mDevice->acquireNextImageKHR(mSwapChain.get(),
+			(std::numeric_limits<uint64_t>::max)(), mImageAvailableSemaphore.get(), {});
+
+		vk::PipelineStageFlags waitStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput;
+
+		auto submitInfo = vk::SubmitInfo{ 1, &mImageAvailableSemaphore.get(), &waitStageMask, 1,
+			&mCommandBuffers[imageIndex.value].get(), 1, &mRenderFinishedSemaphore.get() };
+
+		mGraphicsQueue.submit(submitInfo, {});
+
+		auto presentInfo = vk::PresentInfoKHR{ 1, &mRenderFinishedSemaphore.get(), 1,
+			&mSwapChain.get(), &imageIndex.value };
+		mPresentQueue.presentKHR(presentInfo);
+
+		mDevice->waitIdle();
 	}
 
 	// Utility Functions

@@ -75,6 +75,9 @@ namespace AlphonsoGraphicsEngine
 		CreateRenderPass();
 		CreateDescriptorSetLayout();
 		CreateGraphicsPipeline();
+		CreateFramebuffers();
+		CreateCommandPool();
+		CreateCommandBuffers();
 	}
 
 	void Renderer::Shutdown()
@@ -164,9 +167,6 @@ namespace AlphonsoGraphicsEngine
 
 	void Renderer::CreateSwapChain()
 	{
-		mGraphicsQueue = mDevice->getQueue(graphicsQueueFamilyIndex, 0);
-		mPresentQueue = mDevice->getQueue(presentQueueFamilyIndex, 0);
-
 		struct SM {
 			vk::SharingMode sharingMode;
 			uint32_t familyIndicesCount;
@@ -180,7 +180,7 @@ namespace AlphonsoGraphicsEngine
 		mSwapChainImageFormat = vk::Format::eB8G8R8A8Unorm;
 		mSwapChainExtent = vk::Extent2D{ DefaultScreenWidth, DefaultScreenHeight };
 
-		uint32_t imageCount = capabilities.minImageCount + 1;
+		imageCount = capabilities.minImageCount + 1;
 		if (capabilities.maxImageCount > 0 && imageCount > capabilities.maxImageCount) {
 			imageCount = capabilities.maxImageCount;
 		}
@@ -331,11 +331,11 @@ namespace AlphonsoGraphicsEngine
 
 		auto inputAssembly = vk::PipelineInputAssemblyStateCreateInfo{ {}, vk::PrimitiveTopology::eTriangleList, false };
 
-		auto viewport = vk::Viewport{ 0.0f, 0.0f, static_cast<float>(mSwapChainExtent.width), static_cast<float>(mSwapChainExtent.height), 0.0f, 1.0f };
+		mViewport = vk::Viewport{ 0.0f, 0.0f, static_cast<float>(mSwapChainExtent.width), static_cast<float>(mSwapChainExtent.height), 0.0f, 1.0f };
 
 		auto scissor = vk::Rect2D{ { 0, 0 }, mSwapChainExtent };
 
-		auto viewportState = vk::PipelineViewportStateCreateInfo{ {}, 1, &viewport, 1, &scissor };
+		auto viewportState = vk::PipelineViewportStateCreateInfo{ {}, 1, &mViewport, 1, &scissor };
 
 		auto rasterizer = vk::PipelineRasterizationStateCreateInfo{ {}, /*depthClamp*/ false,
 			/*rasterizeDiscard*/ false, vk::PolygonMode::eFill, {},
@@ -365,6 +365,55 @@ namespace AlphonsoGraphicsEngine
 		mPipeline = mDevice->createGraphicsPipelineUnique({}, pipelineCreateInfo, nullptr, DispatchLoaderDynamic);
 	}
 
+	void Renderer::CreateFramebuffers()
+	{
+		mFrameBuffers.resize(imageCount);
+		for (size_t i = 0; i < mImageViews.size(); i++)
+		{
+			mFrameBuffers[i] = mDevice->createFramebufferUnique(vk::FramebufferCreateInfo
+				{ {}, mRenderPass.get(), 1, &(*mImageViews[i]), mSwapChainExtent.width, mSwapChainExtent.height, 1 }, nullptr, DispatchLoaderDynamic);
+		}
+	}
+
+	void Renderer::CreateCommandPool()
+	{
+		mCommandPool = mDevice->createCommandPoolUnique({ {}, static_cast<uint32_t>(graphicsQueueFamilyIndex) }, nullptr, DispatchLoaderDynamic);
+	}
+
+	void Renderer::CreateCommandBuffers()
+	{
+		mCommandBuffers.resize(mFrameBuffers.size());
+
+		mCommandBuffers = mDevice->allocateCommandBuffersUnique(vk::CommandBufferAllocateInfo(
+				mCommandPool.get(), vk::CommandBufferLevel::ePrimary, mFrameBuffers.size()));
+
+		mGraphicsQueue = mDevice->getQueue(graphicsQueueFamilyIndex, 0);
+		mPresentQueue = mDevice->getQueue(presentQueueFamilyIndex, 0);
+
+		for (size_t i = 0; i < mCommandBuffers.size(); i++)
+		{
+			auto beginInfo = vk::CommandBufferBeginInfo{};
+			beginInfo.flags = vk::CommandBufferUsageFlagBits::eSimultaneousUse;
+			mCommandBuffers[i]->begin(beginInfo);
+			std::array<vk::ClearValue, 2> clearValues = {};
+
+			clearValues[0].color = vk::ClearColorValue(std::array<float, 4>({ 0.0f, 0.0f, 0.0f, 1.0f }));
+			clearValues[1].depthStencil = vk::ClearDepthStencilValue(1.0f, 0);
+			auto renderPassBeginInfo = vk::RenderPassBeginInfo{ mRenderPass.get(), mFrameBuffers[i].get(),
+				vk::Rect2D{ { 0, 0 }, mSwapChainExtent }, clearValues.size(), clearValues.data() };
+
+			mCommandBuffers[i]->beginRenderPass(renderPassBeginInfo, vk::SubpassContents::eInline);
+			mCommandBuffers[i]->bindPipeline(vk::PipelineBindPoint::eGraphics, mPipeline.get()); 
+			//TODO: Bind Vertex Buffers
+			//TODO: Bind Index Buffers
+			//TODO: Bind Descriptor Sets
+			// Use DrawIndexed rather than draw.
+			mCommandBuffers[i]->draw(3, 1, 0, 0);
+			mCommandBuffers[i]->endRenderPass();
+			mCommandBuffers[i]->end();
+		}
+	}
+	
 	std::vector<const char*> Renderer::GetRequiredExtensions()
 	{
 		uint32_t glfwExtensionCount = 0;

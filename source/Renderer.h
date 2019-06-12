@@ -73,7 +73,9 @@ namespace AlphonsoGraphicsEngine
 		void CreateRenderPass();
 		void CreateDescriptorSetLayout();
 		void CreateGraphicsPipeline();
-
+		void CreateFramebuffers();
+		void CreateCommandPool();
+		void CreateCommandBuffers();
 
 		GameClock mGameClock;
 		GameTime mGameTime;
@@ -81,13 +83,14 @@ namespace AlphonsoGraphicsEngine
 		static const int DefaultScreenWidth = 1024;
 		static const int DefaultScreenHeight = 768;
 		const std::vector<const char*> mValidationLayers = {
-			"VK_LAYER_KHRONOS_validation"
+			"VK_LAYER_LUNARG_standard_validation"
 		};
 		const std::vector<const char*> mdeviceExtensions = { 
 			"VK_KHR_swapchain"
 		};
 		std::vector<const char*> mInstanceExtensionNames;
 	private:
+		uint32_t imageCount = 0U;
 		GLFWwindow* mWindow = nullptr;
 		vk::UniqueInstance mVulkanInstance;
 		vk::UniqueHandle<vk::Device, vk::DispatchLoaderDynamic> mDevice;
@@ -98,6 +101,7 @@ namespace AlphonsoGraphicsEngine
 		size_t presentQueueFamilyIndex = 0;
 		vk::Queue mGraphicsQueue;
 		vk::Queue mPresentQueue;
+		vk::Viewport mViewport;
 		vk::UniqueHandle<vk::SwapchainKHR, vk::DispatchLoaderDynamic> mSwapChain;
 		vk::Format mSwapChainImageFormat;
 		vk::Extent2D mSwapChainExtent;
@@ -106,6 +110,7 @@ namespace AlphonsoGraphicsEngine
 		vk::UniqueHandle<vk::ShaderModule, vk::DispatchLoaderDynamic> mFragmentShaderModule;
 		vk::UniqueHandle<vk::RenderPass, vk::DispatchLoaderDynamic> mRenderPass;
 		vk::UniqueHandle<vk::Pipeline, vk::DispatchLoaderDynamic> mPipeline;
+		vk::UniqueHandle<vk::CommandPool, vk::DispatchLoaderDynamic> mCommandPool;
 
 		std::set<size_t> uniqueQueueFamilyIndices;
 		std::vector<vk::LayerProperties> mInstanceLayerProperties;
@@ -115,6 +120,8 @@ namespace AlphonsoGraphicsEngine
 		std::vector<uint32_t> mFamilyIndices;
 		std::vector<vk::Image> mSwapChainImages;
 		std::vector<vk::UniqueImageView> mImageViews;
+		std::vector<vk::UniqueHandle<vk::Framebuffer, vk::DispatchLoaderDynamic>> mFrameBuffers;
+		std::vector<vk::UniqueCommandBuffer> mCommandBuffers;
 	};
 
 	static PFN_vkCreateDebugReportCallbackEXT  mPFN_vkCreateDebugReportCallbackEXT;

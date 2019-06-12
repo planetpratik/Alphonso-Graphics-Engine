@@ -66,9 +66,14 @@ namespace AlphonsoGraphicsEngine
 		void CreateWindowSurface();
 		void SelectPhysicalDevice();
 		void CreateLogicalDevice();
+		uint32_t FindGraphicsQueueFamilyIndex(std::vector<vk::QueueFamilyProperties> const& queueFamilyProperties);
+		std::pair<uint32_t, uint32_t> FindGraphicsAndPresentQueueFamilyIndex(vk::PhysicalDevice physicalDevice, vk::SurfaceKHR const& surface);
 		void CreateSwapChain();
 		void CreateImageViews();
 		void CreateRenderPass();
+		void CreateDescriptorSetLayout();
+		void CreateGraphicsPipeline();
+
 
 		GameClock mGameClock;
 		GameTime mGameTime;
@@ -91,10 +96,17 @@ namespace AlphonsoGraphicsEngine
 		vk::UniqueSurfaceKHR mSurface;
 		size_t graphicsQueueFamilyIndex = 0;
 		size_t presentQueueFamilyIndex = 0;
-		vk::UniqueSwapchainKHR mSwapChain;
+		vk::Queue mGraphicsQueue;
+		vk::Queue mPresentQueue;
+		vk::UniqueHandle<vk::SwapchainKHR, vk::DispatchLoaderDynamic> mSwapChain;
 		vk::Format mSwapChainImageFormat;
 		vk::Extent2D mSwapChainExtent;
 		vk::SwapchainCreateInfoKHR mSwapChainCreateInfo;
+		vk::UniqueHandle<vk::ShaderModule, vk::DispatchLoaderDynamic> mVertexShaderModule;
+		vk::UniqueHandle<vk::ShaderModule, vk::DispatchLoaderDynamic> mFragmentShaderModule;
+		vk::UniqueHandle<vk::RenderPass, vk::DispatchLoaderDynamic> mRenderPass;
+		vk::UniqueHandle<vk::Pipeline, vk::DispatchLoaderDynamic> mPipeline;
+
 		std::set<size_t> uniqueQueueFamilyIndices;
 		std::vector<vk::LayerProperties> mInstanceLayerProperties;
 		std::vector<vk::PhysicalDevice> mPhysicalDevices;

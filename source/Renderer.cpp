@@ -1,8 +1,11 @@
 #include "Renderer.h"
 #include <iostream>
+#include <fstream>
 #include <sstream>
 #include <GL/gl.h>
+#include <shaderc/shaderc.hpp>
 
+using namespace std::string_literals;
 
 namespace AlphonsoGraphicsEngine
 {
@@ -67,6 +70,11 @@ namespace AlphonsoGraphicsEngine
 		CreateWindowSurface();
 		SelectPhysicalDevice();
 		CreateLogicalDevice();
+		CreateSwapChain();
+		CreateImageViews();
+		CreateRenderPass();
+		CreateDescriptorSetLayout();
+		CreateGraphicsPipeline();
 	}
 
 	void Renderer::Shutdown()
@@ -115,17 +123,6 @@ namespace AlphonsoGraphicsEngine
 		}
 
 		mSurface = vk::UniqueSurfaceKHR(surface, *mVulkanInstance);
-
-		// Iterate over each queue to learn whether it supports presenting.
-		// Find a queue with present support
-		// It Will be used to present the swap chain images to the windowing system
-		for (size_t i = 0; i < mQueueFamilyProperties.size(); ++i)
-		{
-			if (mPhysicalDevices[0].getSurfaceSupportKHR(i, mSurface.get()))
-			{
-				presentQueueFamilyIndex = i;
-			}
-		}
 	}
 
 	void Renderer::SelectPhysicalDevice()
@@ -142,13 +139,11 @@ namespace AlphonsoGraphicsEngine
 
 	void Renderer::CreateLogicalDevice()
 	{
-		// Get First occurence of any Queue supporting Graphics Bits
-		// std::find_if gives first element for which predicate returns true.
-		graphicsQueueFamilyIndex = std::distance(mQueueFamilyProperties.begin(),
-			std::find_if(mQueueFamilyProperties.begin(),
-				mQueueFamilyProperties.end(),
-				[](vk::QueueFamilyProperties const& queueFamilyProperties)
-				{ return queueFamilyProperties.queueFlags & vk::QueueFlagBits::eGraphics; }));
+		graphicsQueueFamilyIndex = FindGraphicsQueueFamilyIndex(mQueueFamilyProperties);
+
+		std::pair<uint32_t, uint32_t> graphicsAndPresentQueueFamilyIndex = FindGraphicsAndPresentQueueFamilyIndex(mPhysicalDevices[0], surface);
+
+		presentQueueFamilyIndex = graphicsAndPresentQueueFamilyIndex.second;
 
 		uniqueQueueFamilyIndices = { graphicsQueueFamilyIndex, presentQueueFamilyIndex };
 
@@ -169,6 +164,9 @@ namespace AlphonsoGraphicsEngine
 
 	void Renderer::CreateSwapChain()
 	{
+		mGraphicsQueue = mDevice->getQueue(graphicsQueueFamilyIndex, 0);
+		mPresentQueue = mDevice->getQueue(presentQueueFamilyIndex, 0);
+
 		struct SM {
 			vk::SharingMode sharingMode;
 			uint32_t familyIndicesCount;
@@ -187,13 +185,13 @@ namespace AlphonsoGraphicsEngine
 			imageCount = capabilities.maxImageCount;
 		}
 
-		mSwapChainCreateInfo = vk::SwapchainCreateInfoKHR({}, mSurface.get(), imageCount, mSwapChainImageFormat,
+		mSwapChainCreateInfo = vk::SwapchainCreateInfoKHR({}, *mSurface, imageCount, mSwapChainImageFormat,
 			vk::ColorSpaceKHR::eSrgbNonlinear, mSwapChainExtent, 1, vk::ImageUsageFlagBits::eColorAttachment,
 			sharingModeUtil.sharingMode, sharingModeUtil.familyIndicesCount,
 			sharingModeUtil.familyIndicesDataPtr, vk::SurfaceTransformFlagBitsKHR::eIdentity,
 			vk::CompositeAlphaFlagBitsKHR::eOpaque, vk::PresentModeKHR::eFifo, true, nullptr);
 
-		mSwapChain = mDevice->createSwapchainKHRUnique(mSwapChainCreateInfo);
+		mSwapChain = mDevice->createSwapchainKHRUnique(mSwapChainCreateInfo, nullptr, DispatchLoaderDynamic);
 		mSwapChainImages = mDevice->getSwapchainImagesKHR(mSwapChain.get());
 	}
 
@@ -212,6 +210,159 @@ namespace AlphonsoGraphicsEngine
 
 	void Renderer::CreateRenderPass()
 	{
+		auto colorAttachment = vk::AttachmentDescription{ {}, mSwapChainImageFormat, vk::SampleCountFlagBits::e1,
+			vk::AttachmentLoadOp::eClear, vk::AttachmentStoreOp::eStore, {}, {}, {}, vk::ImageLayout::ePresentSrcKHR };
+
+		auto colourAttachmentRef = vk::AttachmentReference{ 0, vk::ImageLayout::eColorAttachmentOptimal };
+
+		auto subpass = vk::SubpassDescription{ {}, vk::PipelineBindPoint::eGraphics,
+			/*inAttachmentCount*/ 0, nullptr, 1, &colourAttachmentRef };
+
+		auto subpassDependency = vk::SubpassDependency{ VK_SUBPASS_EXTERNAL, 0,
+			vk::PipelineStageFlagBits::eColorAttachmentOutput, vk::PipelineStageFlagBits::eColorAttachmentOutput,
+			{}, vk::AccessFlagBits::eColorAttachmentRead | vk::AccessFlagBits::eColorAttachmentWrite };
+
+		mRenderPass = mDevice->createRenderPassUnique(
+			vk::RenderPassCreateInfo{ {}, 1, &colorAttachment, 1, &subpass, 1, &subpassDependency }, nullptr, DispatchLoaderDynamic);
+		
+		/*
+
+		auto bindingDescription = Vertex::getBindingDescription();
+		auto attributeDescriptions = Vertex::getAttributeDescriptions();
+
+		vertexInputInfo.vertexBindingDescriptionCount = 1;
+		vertexInputInfo.vertexAttributeDescriptionCount = static_cast<uint32_t>(attributeDescriptions.size());
+		vertexInputInfo.pVertexBindingDescriptions = &bindingDescription;
+		vertexInputInfo.pVertexAttributeDescriptions = attributeDescriptions.data();
+
+		VkPipelineDepthStencilStateCreateInfo depthStencil = {};
+		depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+		depthStencil.depthTestEnable = VK_TRUE;
+		depthStencil.depthWriteEnable = VK_TRUE;
+		depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
+		depthStencil.depthBoundsTestEnable = VK_FALSE;
+		depthStencil.stencilTestEnable = VK_FALSE;
+
+	*/
+	}
+
+	void Renderer::CreateDescriptorSetLayout()
+	{
+	}
+
+	void Renderer::CreateGraphicsPipeline()
+	{
+		std::string vertexShader = R"vertexshader(
+        #version 450
+        #extension GL_ARB_separate_shader_objects : enable
+        out gl_PerVertex {
+            vec4 gl_Position;
+        };
+        layout(location = 0) out vec3 fragColor;
+        vec2 positions[3] = vec2[](
+            vec2(0.0, -0.5),
+            vec2(0.5, 0.5),
+            vec2(-0.5, 0.5)
+        );
+        vec3 colors[3] = vec3[](
+            vec3(1.0, 0.0, 0.0),
+            vec3(0.0, 1.0, 0.0),
+            vec3(0.0, 0.0, 1.0)
+        );
+        void main() {
+            gl_Position = vec4(positions[gl_VertexIndex], 0.0, 1.0);
+            fragColor = colors[gl_VertexIndex];
+        }
+        )vertexshader";
+
+		std::string fragmentShader = R"fragmentShader(
+        #version 450
+        #extension GL_ARB_separate_shader_objects : enable
+        layout(location = 0) in vec3 fragColor;
+        layout(location = 0) out vec4 outColor;
+        void main() {
+            outColor = vec4(fragColor, 1.0);
+        }
+        )fragmentShader";
+
+		shaderc::Compiler compiler;
+		shaderc::CompileOptions options;
+		options.SetOptimizationLevel(shaderc_optimization_level_performance);
+
+		// Compile GLSL Vertex Shader to SPIR-V
+		shaderc::SpvCompilationResult vertShaderModule =
+			compiler.CompileGlslToSpv(vertexShader, shaderc_glsl_vertex_shader, "vertex shader", options);
+		if (vertShaderModule.GetCompilationStatus() != shaderc_compilation_status_success)
+		{
+			std::cerr << vertShaderModule.GetErrorMessage();
+		}
+		auto vertShaderCode = std::vector<uint32_t>{ vertShaderModule.cbegin(), vertShaderModule.cend() };
+		auto vertSize = std::distance(vertShaderCode.begin(), vertShaderCode.end());
+		auto vertShaderCreateInfo =
+			vk::ShaderModuleCreateInfo{ {}, vertSize * sizeof(uint32_t), vertShaderCode.data() };
+
+		mVertexShaderModule = mDevice->createShaderModuleUnique(vertShaderCreateInfo, nullptr, DispatchLoaderDynamic);
+
+		// Compile GLSL Fragment Shader to SPIR-V
+		shaderc::SpvCompilationResult fragShaderModule = compiler.CompileGlslToSpv(
+			fragmentShader, shaderc_glsl_fragment_shader, "fragment shader", options);
+
+		if (fragShaderModule.GetCompilationStatus() != shaderc_compilation_status_success)
+		{
+			std::cerr << fragShaderModule.GetErrorMessage();
+		}
+
+		auto fragShaderCode = std::vector<uint32_t>{ fragShaderModule.cbegin(), fragShaderModule.cend() };
+		auto fragSize = std::distance(fragShaderCode.begin(), fragShaderCode.end());
+		auto fragShaderCreateInfo =
+			vk::ShaderModuleCreateInfo{ {}, fragSize * sizeof(uint32_t), fragShaderCode.data() };
+
+		mFragmentShaderModule = mDevice->createShaderModuleUnique(fragShaderCreateInfo, nullptr, DispatchLoaderDynamic);
+
+		auto vertShaderStageInfo = vk::PipelineShaderStageCreateInfo
+		{ {}, vk::ShaderStageFlagBits::eVertex, *mVertexShaderModule, "main" };
+
+		auto fragShaderStageInfo = vk::PipelineShaderStageCreateInfo
+		{ {}, vk::ShaderStageFlagBits::eFragment, *mFragmentShaderModule, "main" };
+
+		auto pipelineShaderStages = std::vector<vk::PipelineShaderStageCreateInfo>{ vertShaderStageInfo, fragShaderStageInfo };
+
+		auto vertexInputInfo = vk::PipelineVertexInputStateCreateInfo{ {}, 0u, nullptr, 0u, nullptr };
+
+		auto inputAssembly = vk::PipelineInputAssemblyStateCreateInfo{ {}, vk::PrimitiveTopology::eTriangleList, false };
+
+		auto viewport = vk::Viewport{ 0.0f, 0.0f, static_cast<float>(mSwapChainExtent.width), static_cast<float>(mSwapChainExtent.height), 0.0f, 1.0f };
+
+		auto scissor = vk::Rect2D{ { 0, 0 }, mSwapChainExtent };
+
+		auto viewportState = vk::PipelineViewportStateCreateInfo{ {}, 1, &viewport, 1, &scissor };
+
+		auto rasterizer = vk::PipelineRasterizationStateCreateInfo{ {}, /*depthClamp*/ false,
+			/*rasterizeDiscard*/ false, vk::PolygonMode::eFill, {},
+			/*frontFace*/ vk::FrontFace::eCounterClockwise, {}, {}, {}, {}, 1.0f };
+
+		auto multisampling = vk::PipelineMultisampleStateCreateInfo{ {}, vk::SampleCountFlagBits::e1, false, 1.0 };
+
+		auto colorBlendAttachment = vk::PipelineColorBlendAttachmentState{ {}, /*srcCol*/ vk::BlendFactor::eOne,
+			/*dstCol*/ vk::BlendFactor::eZero, /*colBlend*/ vk::BlendOp::eAdd,
+			/*srcAlpha*/ vk::BlendFactor::eOne, /*dstAlpha*/ vk::BlendFactor::eZero,
+			/*alphaBlend*/ vk::BlendOp::eAdd,
+			vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG | vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA };
+
+		auto colorBlending = vk::PipelineColorBlendStateCreateInfo
+		{ {}, /*logicOpEnable=*/false, vk::LogicOp::eCopy, /*attachmentCount=*/1, /*colourAttachments=*/&colorBlendAttachment };
+
+		auto pipelineLayout = mDevice->createPipelineLayoutUnique({}, nullptr, DispatchLoaderDynamic);
+
+		auto semaphoreCreateInfo = vk::SemaphoreCreateInfo{};
+		auto imageAvailableSemaphore = mDevice->createSemaphoreUnique(semaphoreCreateInfo, nullptr, DispatchLoaderDynamic);
+		auto renderFinishedSemaphore = mDevice->createSemaphoreUnique(semaphoreCreateInfo, nullptr, DispatchLoaderDynamic);
+
+		auto pipelineCreateInfo = vk::GraphicsPipelineCreateInfo{ {}, 2, pipelineShaderStages.data(),
+			&vertexInputInfo, &inputAssembly, nullptr, &viewportState, &rasterizer, &multisampling,
+			nullptr, &colorBlending, nullptr, *pipelineLayout, *mRenderPass, 0 };
+
+		mPipeline = mDevice->createGraphicsPipelineUnique({}, pipelineCreateInfo, nullptr, DispatchLoaderDynamic);
 	}
 
 	std::vector<const char*> Renderer::GetRequiredExtensions()
@@ -287,5 +438,48 @@ namespace AlphonsoGraphicsEngine
 	void Renderer::Draw(const GameTime& gameTime)
 	{
 		gameTime;
+	}
+
+	// Utility Functions
+
+	uint32_t Renderer::FindGraphicsQueueFamilyIndex(std::vector<vk::QueueFamilyProperties> const& queueFamilyProperties)
+	{
+		// get the first index into queueFamiliyProperties which supports graphics
+		// std::find_if gives first element for which predicate returns true.
+		size_t GraphicsQueueFamilyIndex = std::distance(queueFamilyProperties.begin(), std::find_if(queueFamilyProperties.begin(), queueFamilyProperties.end(),
+			[](vk::QueueFamilyProperties const& qfp) { return qfp.queueFlags & vk::QueueFlagBits::eGraphics; }));
+		assert(graphicsQueueFamilyIndex < queueFamilyProperties.size());
+		return static_cast<uint32_t>(GraphicsQueueFamilyIndex);
+	}
+
+	std::pair<uint32_t, uint32_t> Renderer::FindGraphicsAndPresentQueueFamilyIndex(vk::PhysicalDevice physicalDevice, vk::SurfaceKHR const& Surface)
+	{
+		std::vector<vk::QueueFamilyProperties> queueFamilyProperties = physicalDevice.getQueueFamilyProperties();
+
+		uint32_t GraphicsQueueFamilyIndex = FindGraphicsQueueFamilyIndex(queueFamilyProperties);
+		if (physicalDevice.getSurfaceSupportKHR(GraphicsQueueFamilyIndex, Surface))
+		{
+			return std::make_pair(GraphicsQueueFamilyIndex, GraphicsQueueFamilyIndex);    // the first graphicsQueueFamilyIndex does also support presents
+		}
+
+		// the graphicsQueueFamilyIndex doesn't support present -> look for an other family index that supports both graphics and present
+		for (size_t i = 0; i < queueFamilyProperties.size(); i++)
+		{
+			if ((queueFamilyProperties[i].queueFlags & vk::QueueFlagBits::eGraphics) && physicalDevice.getSurfaceSupportKHR(static_cast<uint32_t>(i), Surface))
+			{
+				return std::make_pair(static_cast<uint32_t>(i), static_cast<uint32_t>(i));
+			}
+		}
+
+		// there's nothing like a single family index that supports both graphics and present -> look for an other family index that supports present
+		for (size_t i = 0; i < queueFamilyProperties.size(); i++)
+		{
+			if (physicalDevice.getSurfaceSupportKHR(static_cast<uint32_t>(i), Surface))
+			{
+				return std::make_pair(graphicsQueueFamilyIndex, static_cast<uint32_t>(i));
+			}
+		}
+
+		throw std::runtime_error("Could not find queues for both graphics or present -> terminating");
 	}
 }

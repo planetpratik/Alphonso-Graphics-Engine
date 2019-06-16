@@ -5,8 +5,29 @@
 #include <GL/gl.h>
 #include <shaderc/shaderc.hpp>
 #include <limits>
+#include <unordered_map>
+
+#define TINYOBJLOADER_IMPLEMENTATION
+#include <tiny_obj_loader.h>
+
+#pragma warning(push)
+#pragma warning(disable:4201)
+#define GLM_ENABLE_EXPERIMENTAL
+#include <glm/gtx/hash.hpp>
+#pragma warning(pop)
 
 using namespace std::string_literals;
+
+namespace std
+{
+	template<> struct hash<AlphonsoGraphicsEngine::Renderer::Vertex>
+	{
+		size_t operator()(AlphonsoGraphicsEngine::Renderer::Vertex const& vertex) const
+		{
+			return ((hash<glm::vec3>()(vertex.pos) ^ (hash<glm::vec3>()(vertex.color) << 1)) >> 1) ^ (hash<glm::vec2>()(vertex.texCoord) << 1);
+		}
+	};
+}
 
 namespace AlphonsoGraphicsEngine
 {
@@ -76,8 +97,14 @@ namespace AlphonsoGraphicsEngine
 		CreateRenderPass();
 		CreateDescriptorSetLayout();
 		CreateGraphicsPipeline();
-		CreateFramebuffers();
 		CreateCommandPool();
+		CreateFramebuffers();
+		LoadModel();
+		CreateVertexBuffer();
+		CreateIndexBuffer();
+		CreateUniformBuffers();
+		CreateDescriptorPool();
+		CreateDescriptorSets();
 		CreateCommandBuffers();
 		CreateSemaphores();
 	}
@@ -94,7 +121,7 @@ namespace AlphonsoGraphicsEngine
 		 mInstanceLayerProperties = vk::enumerateInstanceLayerProperties();
 		 if(!CheckValidationLayers(mValidationLayers, mInstanceLayerProperties))
 		 {
-			 std::cout << "Set the environment variable VK_LAYER_PATH to point to the location of your layers" << std::endl;
+			 std::cout << "Set Appropriate Supported Layer by checking vulkaninfo() log." << std::endl;
 			 exit(1);
 		 }
 		// Create application & Instance Information.
@@ -110,9 +137,9 @@ namespace AlphonsoGraphicsEngine
 		vk::InstanceCreateInfo instanceInfo(
 			vk::InstanceCreateFlags(),
 			&applicationInfo,
-			mValidationLayers.size(),
+			static_cast<uint32_t>(mValidationLayers.size()),
 			mValidationLayers.data(),
-			mInstanceExtensionNames.size(),
+			static_cast<uint32_t>(mInstanceExtensionNames.size()),
 			mInstanceExtensionNames.data());
 		
 		// Using Unique instance. Being UniqueInstance, it doesn't need to be explicitly destroyed.
@@ -152,18 +179,20 @@ namespace AlphonsoGraphicsEngine
 
 		uniqueQueueFamilyIndices = { graphicsQueueFamilyIndex, presentQueueFamilyIndex };
 
-		mFamilyIndices = { uniqueQueueFamilyIndices.begin(), uniqueQueueFamilyIndices.end() };
+		mFamilyIndices = { static_cast<uint32_t>(graphicsQueueFamilyIndex), static_cast<uint32_t>(presentQueueFamilyIndex) };
+
+		//mFamilyIndices = { uniqueQueueFamilyIndices.begin(), uniqueQueueFamilyIndices.end() };
 
 		// Create a Unique Device. It doesn't need to be explicitly destroyed.
 		float queuePriority = 0.0f;
-		for (int queueFamilyIndex : uniqueQueueFamilyIndices)
+		for (size_t queueFamilyIndex : uniqueQueueFamilyIndices)
 		{
 			mdeviceQueueCreateInfo.push_back(vk::DeviceQueueCreateInfo{ vk::DeviceQueueCreateFlags(),
 				static_cast<uint32_t>(queueFamilyIndex), 1, &queuePriority });
 		}
 
 		mDevice = mPhysicalDevices[0].createDeviceUnique(vk::DeviceCreateInfo(
-			vk::DeviceCreateFlags(), mdeviceQueueCreateInfo.size(), mdeviceQueueCreateInfo.data(), 0, nullptr, mdeviceExtensions.size(), mdeviceExtensions.data()),
+			vk::DeviceCreateFlags(), static_cast<uint32_t>(mdeviceQueueCreateInfo.size()), mdeviceQueueCreateInfo.data(), 0, nullptr, static_cast<uint32_t>(mdeviceExtensions.size()), mdeviceExtensions.data()),
 			nullptr, DispatchLoaderDynamic);
 	}
 
@@ -373,6 +402,139 @@ namespace AlphonsoGraphicsEngine
 		}
 	}
 
+	void Renderer::LoadModel()
+	{
+		tinyobj::attrib_t attrib;
+		std::vector<tinyobj::shape_t> shapes;
+		std::vector<tinyobj::material_t> materials;
+		std::string warn, err;
+
+		if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, MODEL_PATH.c_str())) {
+			throw std::runtime_error(warn + err);
+		}
+
+		std::unordered_map<Vertex, uint32_t> uniqueVertices = {};
+
+		for (const auto& shape : shapes) {
+			for (const auto& index : shape.mesh.indices) {
+				Vertex vertex = {};
+
+				vertex.pos = {
+					attrib.vertices[3 * index.vertex_index + 0],
+					attrib.vertices[3 * index.vertex_index + 1],
+					attrib.vertices[3 * index.vertex_index + 2]
+				};
+
+				vertex.texCoord = {
+					attrib.texcoords[2 * index.texcoord_index + 0],
+					1.0f - attrib.texcoords[2 * index.texcoord_index + 1]
+				};
+
+				vertex.color = { 1.0f, 1.0f, 1.0f };
+
+				if (uniqueVertices.count(vertex) == 0) {
+					uniqueVertices[vertex] = static_cast<uint32_t>(mVertices.size());
+					mVertices.push_back(vertex);
+				}
+
+				mIndices.push_back(uniqueVertices[vertex]);
+			}
+		}
+	}
+
+	void Renderer::CreateVertexBuffer()
+	{
+		void* data;
+		graphicsQueueFamilyIndexUnsignedInt = static_cast<uint32_t>(graphicsQueueFamilyIndex);
+
+		// Setup Vertex Buffer Size
+		vk::DeviceSize vertexBufferSize = static_cast<vk::DeviceSize>(sizeof(mVertices[0])) * static_cast<vk::DeviceSize>(mVertices.size());
+
+
+		// Create Vertex Buffer
+		stagingBuffers.vertices.buffer = mDevice->createBufferUnique(
+			vk::BufferCreateInfo(vk::BufferCreateFlags(), vertexBufferSize,
+				vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eTransferSrc, vk::SharingMode::eExclusive,
+				1U, &graphicsQueueFamilyIndexUnsignedInt), nullptr, DispatchLoaderDynamic);
+
+		vk::MemoryRequirements memRequirements;
+		memRequirements = mDevice->getBufferMemoryRequirements(*stagingBuffers.vertices.buffer);
+
+		// Request a host visible memory type that can be used to copy our data do
+		// Also request it to be coherent, so that writes are visible to the GPU right after unmapping the buffer
+		stagingBuffers.vertices.memory = mDevice->allocateMemoryUnique(
+			vk::MemoryAllocateInfo(memRequirements.size, FindMemoryType(memRequirements.memoryTypeBits, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent)), nullptr, DispatchLoaderDynamic);
+
+		// Map and copy
+		data = mDevice->mapMemory(*stagingBuffers.vertices.memory, 0, memRequirements.size, vk::MemoryMapFlags());
+		memcpy(data, mVertices.data(), static_cast<size_t>(vertexBufferSize));
+		mDevice->unmapMemory(*stagingBuffers.vertices.memory);
+		mDevice->bindBufferMemory(*stagingBuffers.vertices.buffer, *stagingBuffers.vertices.memory, 0);
+
+		// Create a device local buffer to which the (host local) vertex data will be copied and which will be used for rendering
+		VertexBufferOnGPU.buffer = mDevice->createBufferUnique(
+			vk::BufferCreateInfo(vk::BufferCreateFlags(), vertexBufferSize,
+				vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eTransferDst, vk::SharingMode::eExclusive,
+				1, &graphicsQueueFamilyIndexUnsignedInt), nullptr, DispatchLoaderDynamic);
+
+		memRequirements = mDevice->getBufferMemoryRequirements(*VertexBufferOnGPU.buffer);
+
+		VertexBufferOnGPU.memory = mDevice->allocateMemoryUnique(
+			vk::MemoryAllocateInfo(memRequirements.size, FindMemoryType(memRequirements.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal)), nullptr, DispatchLoaderDynamic);
+
+		mDevice->bindBufferMemory(*VertexBufferOnGPU.buffer, *VertexBufferOnGPU.memory, 0);
+	}
+
+	void Renderer::CreateIndexBuffer()
+	{
+		void* data;
+		graphicsQueueFamilyIndexUnsignedInt = static_cast<uint32_t>(graphicsQueueFamilyIndex);
+
+		// Setup Index Buffer Size
+		vk::DeviceSize IndexBufferSize = static_cast<vk::DeviceSize>(sizeof(mIndices[0])) * static_cast<vk::DeviceSize>(mIndices.size());
+
+		// Create Index buffer
+		// Copy index data to a buffer visible to the host (staging buffer)
+		stagingBuffers.indices.buffer = mDevice->createBufferUnique(vk::BufferCreateInfo(
+			vk::BufferCreateFlags(),IndexBufferSize,
+			vk::BufferUsageFlagBits::eTransferSrc,vk::SharingMode::eExclusive,
+			1,&graphicsQueueFamilyIndexUnsignedInt), nullptr, DispatchLoaderDynamic);
+
+		vk::MemoryRequirements memRequirements;
+		memRequirements = mDevice->getBufferMemoryRequirements(*stagingBuffers.indices.buffer);
+		stagingBuffers.indices.memory = mDevice->allocateMemoryUnique(
+			vk::MemoryAllocateInfo(memRequirements.size,FindMemoryType(memRequirements.memoryTypeBits, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent)), nullptr, DispatchLoaderDynamic);
+
+		data = mDevice->mapMemory(*stagingBuffers.indices.memory, 0, IndexBufferSize, vk::MemoryMapFlags());
+		memcpy(data, mIndices.data(), static_cast<size_t>(IndexBufferSize));
+		mDevice->unmapMemory(*stagingBuffers.indices.memory);
+		mDevice->bindBufferMemory(*stagingBuffers.indices.buffer, *stagingBuffers.indices.memory, 0);
+
+		// Create destination buffer with device only visibility
+		IndexBufferOnGPU.buffer = mDevice->createBufferUnique(
+			vk::BufferCreateInfo(vk::BufferCreateFlags(),IndexBufferSize,
+				vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eIndexBuffer, vk::SharingMode::eExclusive,
+				0,nullptr), nullptr, DispatchLoaderDynamic);
+
+		memRequirements = mDevice->getBufferMemoryRequirements(*IndexBufferOnGPU.buffer);
+		IndexBufferOnGPU.memory = mDevice->allocateMemoryUnique(
+			vk::MemoryAllocateInfo(memRequirements.size, FindMemoryType(memRequirements.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal)), nullptr, DispatchLoaderDynamic);
+
+		mDevice->bindBufferMemory(*IndexBufferOnGPU.buffer, *IndexBufferOnGPU.memory, 0);
+	}
+
+	void Renderer::CreateUniformBuffers()
+	{
+	}
+
+	void Renderer::CreateDescriptorPool()
+	{
+	}
+
+	void Renderer::CreateDescriptorSets()
+	{
+	}
+
 	void Renderer::CreateCommandPool()
 	{
 		mCommandPool = mDevice->createCommandPoolUnique({ {}, static_cast<uint32_t>(graphicsQueueFamilyIndex) }, nullptr, DispatchLoaderDynamic);
@@ -383,10 +545,10 @@ namespace AlphonsoGraphicsEngine
 		mCommandBuffers.resize(mFrameBuffers.size());
 
 		mCommandBuffers = mDevice->allocateCommandBuffersUnique(vk::CommandBufferAllocateInfo(
-				mCommandPool.get(), vk::CommandBufferLevel::ePrimary, mFrameBuffers.size()));
+				mCommandPool.get(), vk::CommandBufferLevel::ePrimary, static_cast<uint32_t>(mFrameBuffers.size())));
 
-		mGraphicsQueue = mDevice->getQueue(graphicsQueueFamilyIndex, 0);
-		mPresentQueue = mDevice->getQueue(presentQueueFamilyIndex, 0);
+		mGraphicsQueue = mDevice->getQueue(static_cast<uint32_t>(graphicsQueueFamilyIndex), 0);
+		mPresentQueue = mDevice->getQueue(static_cast<uint32_t>(presentQueueFamilyIndex), 0);
 
 		for (size_t i = 0; i < mCommandBuffers.size(); i++)
 		{
@@ -398,7 +560,7 @@ namespace AlphonsoGraphicsEngine
 			clearValues[0].color = vk::ClearColorValue(std::array<float, 4>({ 0.0f, 0.0f, 0.0f, 1.0f }));
 			clearValues[1].depthStencil = vk::ClearDepthStencilValue(1.0f, 0);
 			auto renderPassBeginInfo = vk::RenderPassBeginInfo{ mRenderPass.get(), mFrameBuffers[i].get(),
-				vk::Rect2D{ { 0, 0 }, mSwapChainExtent }, clearValues.size(), clearValues.data() };
+				vk::Rect2D{ { 0, 0 }, mSwapChainExtent }, static_cast<uint32_t>(clearValues.size()), clearValues.data() };
 
 			mCommandBuffers[i]->beginRenderPass(renderPassBeginInfo, vk::SubpassContents::eInline);
 			mCommandBuffers[i]->bindPipeline(vk::PipelineBindPoint::eGraphics, mPipeline.get()); 
@@ -545,10 +707,34 @@ namespace AlphonsoGraphicsEngine
 		{
 			if (physicalDevice.getSurfaceSupportKHR(static_cast<uint32_t>(i), Surface))
 			{
-				return std::make_pair(graphicsQueueFamilyIndex, static_cast<uint32_t>(i));
+				return std::make_pair(static_cast<uint32_t>(graphicsQueueFamilyIndex), static_cast<uint32_t>(i));
 			}
 		}
 
 		throw std::runtime_error("Could not find queues for both graphics or present -> terminating");
 	}
+
+	uint32_t Renderer::FindMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties)
+	{
+		vk::PhysicalDeviceMemoryProperties memProperties;
+		memProperties = mPhysicalDevices[0].getMemoryProperties();
+
+		for (uint32_t i = 0; i < memProperties.memoryTypeCount; i++) {
+			if ((typeFilter & (1 << i)) && (memProperties.memoryTypes[i].propertyFlags & properties) == properties) {
+				return i;
+			}
+		}
+		throw std::runtime_error("failed to find suitable memory type!");
+	}
+
+	/*void Renderer::CopyBuffer(vk::UniqueBuffer& srcBuffer, vk::UniqueBuffer& dstBuffer, vk::DeviceSize size) {
+		vk::UniqueCommandBuffer commandBuffer = beginSingleTimeCommands();
+
+		vk::BufferCopy copyRegion = {};
+		copyRegion.size = size;
+		commandBuffer->copyBuffer(srcBuffer.get(), dstBuffer.get(), 1, copyRegion);
+		vkCmdCopyBuffer(*commandBuffer, srcBuffer, dstBuffer, 1, &copyRegion);
+
+		endSingleTimeCommands(commandBuffer);
+	}*/
 }

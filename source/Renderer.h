@@ -5,6 +5,7 @@
 #include <vulkan/vulkan.hpp>
 #include <GLFW/glfw3.h>
 #include <set>
+#include <glm/glm.hpp>
 #include "GameClock.h"
 #include "GameTime.h"
 
@@ -54,6 +55,48 @@ namespace AlphonsoGraphicsEngine
 		/// <param name="gameTime">Const reference to passed GameTime.</param>
 		virtual void Draw(const GameTime& gameTime);
 
+
+		struct Vertex
+		{
+			glm::vec3 pos;
+			glm::vec3 color;
+			glm::vec2 texCoord;
+
+			static vk::VertexInputBindingDescription getBindingDescription()
+			{
+				vk::VertexInputBindingDescription bindingDescription = {};
+				bindingDescription.binding = 0;
+				bindingDescription.stride = sizeof(Vertex);
+				bindingDescription.inputRate = vk::VertexInputRate::eVertex;
+				return bindingDescription;
+			}
+
+			static std::array<vk::VertexInputAttributeDescription, 3> getAttributeDescriptions() {
+				std::array<vk::VertexInputAttributeDescription, 3> attributeDescriptions = {};
+
+				attributeDescriptions[0].binding = 0;
+				attributeDescriptions[0].location = 0;
+				attributeDescriptions[0].format = vk::Format::eR32G32B32Sfloat;
+				attributeDescriptions[0].offset = offsetof(Vertex, pos);
+
+				attributeDescriptions[1].binding = 0;
+				attributeDescriptions[1].location = 1;
+				attributeDescriptions[1].format = vk::Format::eR32G32B32Sfloat;
+				attributeDescriptions[1].offset = offsetof(Vertex, color);
+
+				attributeDescriptions[2].binding = 0;
+				attributeDescriptions[2].location = 2;
+				attributeDescriptions[2].format = vk::Format::eR32G32B32Sfloat;
+				attributeDescriptions[2].offset = offsetof(Vertex, texCoord);
+
+				return attributeDescriptions;
+			}
+
+			bool operator==(const Vertex& other) const {
+				return pos == other.pos && color == other.color && texCoord == other.texCoord;
+			}
+		};
+
 	protected:
 		virtual void InitializeWindow();
 		virtual void InitializeVulkan();
@@ -73,10 +116,18 @@ namespace AlphonsoGraphicsEngine
 		void CreateRenderPass();
 		void CreateDescriptorSetLayout();
 		void CreateGraphicsPipeline();
-		void CreateFramebuffers();
 		void CreateCommandPool();
+		void CreateFramebuffers();
+		void LoadModel();
+		void CreateVertexBuffer();
+		void CreateIndexBuffer();
+		void CreateUniformBuffers();
+		void CreateDescriptorPool();
+		void CreateDescriptorSets();
 		void CreateCommandBuffers();
 		void CreateSemaphores();
+		uint32_t FindMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties);
+		//void CopyBuffer(vk::UniqueBuffer& srcBuffer, vk::UniqueBuffer& dstBuffer, vk::DeviceSize size);
 
 		GameClock mGameClock;
 		GameTime mGameTime;
@@ -89,8 +140,36 @@ namespace AlphonsoGraphicsEngine
 		const std::vector<const char*> mdeviceExtensions = { 
 			"VK_KHR_swapchain"
 		};
+
+		const std::string MODEL_PATH = "../../Assets/Models/cube.objs";
+
 		std::vector<const char*> mInstanceExtensionNames;
 	private:
+		struct StagingBuffer {
+			vk::UniqueHandle<vk::DeviceMemory, vk::DispatchLoaderDynamic> memory;
+			vk::UniqueHandle<vk::Buffer, vk::DispatchLoaderDynamic> buffer;
+		};
+
+		struct {
+			StagingBuffer vertices;
+			StagingBuffer indices;
+		} stagingBuffers;
+
+		struct {
+			vk::UniqueHandle<vk::DeviceMemory, vk::DispatchLoaderDynamic> memory;		// Handle to the device memory for this buffer
+			vk::UniqueHandle<vk::Buffer, vk::DispatchLoaderDynamic> buffer;			// Handle to the Vulkan buffer object that the memory is bound to
+			vk::PipelineVertexInputStateCreateInfo inputState;
+			vk::VertexInputBindingDescription inputBinding;
+			std::vector<vk::VertexInputAttributeDescription> inputAttributes;
+		} VertexBufferOnGPU;
+
+		struct
+		{
+			vk::UniqueHandle<vk::DeviceMemory, vk::DispatchLoaderDynamic> memory;
+			vk::UniqueHandle<vk::Buffer, vk::DispatchLoaderDynamic> buffer;
+			uint32_t count = 0;
+		} IndexBufferOnGPU;
+
 		uint32_t imageCount = 0U;
 		GLFWwindow* mWindow = nullptr;
 		vk::UniqueInstance mVulkanInstance;
@@ -99,10 +178,15 @@ namespace AlphonsoGraphicsEngine
 		VkSurfaceKHR surface;
 		vk::UniqueSurfaceKHR mSurface;
 		size_t graphicsQueueFamilyIndex = 0;
+		uint32_t graphicsQueueFamilyIndexUnsignedInt = 0;
 		size_t presentQueueFamilyIndex = 0;
 		vk::Queue mGraphicsQueue;
 		vk::Queue mPresentQueue;
 		vk::Viewport mViewport;
+		vk::UniqueBuffer mVertexBuffer;
+		vk::UniqueDeviceMemory mVertexBufferMemory;
+		vk::UniqueBuffer mIndexBuffer;
+		vk::UniqueDeviceMemory mIndexBufferMemory;
 		vk::UniqueHandle<vk::SwapchainKHR, vk::DispatchLoaderDynamic> mSwapChain;
 		vk::Format mSwapChainImageFormat;
 		vk::Extent2D mSwapChainExtent;
@@ -125,8 +209,15 @@ namespace AlphonsoGraphicsEngine
 		std::vector<vk::UniqueImageView> mImageViews;
 		std::vector<vk::UniqueHandle<vk::Framebuffer, vk::DispatchLoaderDynamic>> mFrameBuffers;
 		std::vector<vk::UniqueCommandBuffer> mCommandBuffers;
+		std::vector<Vertex> mVertices;
+
+		std::vector<uint32_t> mIndices = { 0, 1, 2, 2, 3, 0 };
 	};
 
 	static PFN_vkCreateDebugReportCallbackEXT  mPFN_vkCreateDebugReportCallbackEXT;
 	static PFN_vkDestroyDebugReportCallbackEXT mPFN_vkDestroyDebugReportCallbackEXT;
+
+	
+
+
 }

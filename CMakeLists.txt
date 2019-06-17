@@ -38,6 +38,7 @@ include_directories(${glfw3_INCLUDE_DIR})
 include_directories(${OPENGL_INCLUDE_DIR})
 include_directories(${shaderc_INCLUDE_DIR})
 include_directories(${tinyobjloader_INCLUDE_DIR})
+include_directories(${stb_INCLUDE_DIR})
 
 add_executable(AlphonsoEngine ${ENGINE_SOURCE_FILES})
 

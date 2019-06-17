@@ -5,6 +5,7 @@
 #include <vulkan/vulkan.hpp>
 #include <GLFW/glfw3.h>
 #include <set>
+//#define GLM_FORCE_DEFAULT_ALIGNED_GENTYPES
 #include <glm/glm.hpp>
 #include "GameClock.h"
 #include "GameTime.h"
@@ -126,6 +127,7 @@ namespace AlphonsoGraphicsEngine
 		void CreateDescriptorSets();
 		void CreateCommandBuffers();
 		void CreateSemaphores();
+		void UpdateUniformBuffer(vk::ResultValue<uint32_t> imageIndex);
 		uint32_t FindMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties);
 		//void CopyBuffer(vk::UniqueBuffer& srcBuffer, vk::UniqueBuffer& dstBuffer, vk::DeviceSize size);
 
@@ -170,6 +172,18 @@ namespace AlphonsoGraphicsEngine
 			uint32_t count = 0;
 		} IndexBufferOnGPU;
 
+		struct UniformBufferObject {
+			alignas(16) glm::mat4 model;
+			alignas(16) glm::mat4 view;
+			alignas(16) glm::mat4 proj;
+		};
+
+		/*struct {
+			vk::UniqueHandle<vk::DeviceMemory, vk::DispatchLoaderDynamic> memory;
+			vk::UniqueHandle<vk::Buffer, vk::DispatchLoaderDynamic> buffer;
+			vk::DescriptorBufferInfo descriptor;
+		} UniformData;*/
+
 		uint32_t imageCount = 0U;
 		GLFWwindow* mWindow = nullptr;
 		vk::UniqueInstance mVulkanInstance;
@@ -187,17 +201,24 @@ namespace AlphonsoGraphicsEngine
 		vk::UniqueDeviceMemory mVertexBufferMemory;
 		vk::UniqueBuffer mIndexBuffer;
 		vk::UniqueDeviceMemory mIndexBufferMemory;
+		vk::ImageView mTextureImageView;
+		vk::Sampler mTextureSampler;
+		
 		vk::UniqueHandle<vk::SwapchainKHR, vk::DispatchLoaderDynamic> mSwapChain;
 		vk::Format mSwapChainImageFormat;
 		vk::Extent2D mSwapChainExtent;
 		vk::SwapchainCreateInfoKHR mSwapChainCreateInfo;
+		vk::DescriptorSetLayoutBinding mUBOLayoutBinding;
+		vk::DescriptorSetLayoutBinding mSamplerLayoutBinding;
 		vk::UniqueHandle<vk::ShaderModule, vk::DispatchLoaderDynamic> mVertexShaderModule;
 		vk::UniqueHandle<vk::ShaderModule, vk::DispatchLoaderDynamic> mFragmentShaderModule;
 		vk::UniqueHandle<vk::RenderPass, vk::DispatchLoaderDynamic> mRenderPass;
 		vk::UniqueHandle<vk::Pipeline, vk::DispatchLoaderDynamic> mPipeline;
+		vk::UniqueHandle<vk::PipelineLayout, vk::DispatchLoaderDynamic> mPipelineLayout;
 		vk::UniqueHandle<vk::CommandPool, vk::DispatchLoaderDynamic> mCommandPool;
 		vk::UniqueHandle<vk::Semaphore, vk::DispatchLoaderDynamic> mImageAvailableSemaphore;
 		vk::UniqueHandle<vk::Semaphore, vk::DispatchLoaderDynamic> mRenderFinishedSemaphore;
+		vk::UniqueHandle<vk::DescriptorPool, vk::DispatchLoaderDynamic> mDescriptorPool;
 
 		std::set<size_t> uniqueQueueFamilyIndices;
 		std::vector<vk::LayerProperties> mInstanceLayerProperties;
@@ -209,8 +230,13 @@ namespace AlphonsoGraphicsEngine
 		std::vector<vk::UniqueImageView> mImageViews;
 		std::vector<vk::UniqueHandle<vk::Framebuffer, vk::DispatchLoaderDynamic>> mFrameBuffers;
 		std::vector<vk::UniqueCommandBuffer> mCommandBuffers;
+		//std::vector<vk::UniqueHandle<vk::DescriptorSetLayout, vk::DispatchLoaderDynamic>> mDescriptorSetLayouts;
+		std::vector<vk::UniqueDescriptorSetLayout> mDescriptorSetLayouts;
+		std::vector<vk::UniqueDescriptorSet> mDescriptorSets;
+		//std::vector<vk::DescriptorSetLayout> mDescriptorSetLayouts;
+		std::vector<vk::UniqueHandle<vk::Buffer, vk::DispatchLoaderDynamic>> mUniformBuffers;
+		std::vector<vk::UniqueHandle<vk::DeviceMemory, vk::DispatchLoaderDynamic>> mUniformBuffersMemory;
 		std::vector<Vertex> mVertices;
-
 		std::vector<uint32_t> mIndices = { 0, 1, 2, 2, 3, 0 };
 	};
 

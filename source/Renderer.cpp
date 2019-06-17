@@ -16,6 +16,11 @@
 #include <glm/gtx/hash.hpp>
 #pragma warning(pop)
 
+#define STB_IMAGE_IMPLEMENTATION
+#include <stb_image.h>
+
+#define UNREFERENCED_PARAMETER(P) (P)
+
 using namespace std::string_literals;
 
 namespace std
@@ -69,7 +74,7 @@ namespace AlphonsoGraphicsEngine
 		}
 		message << "[" << pLayerPrefix << "] Code " << msgCode << " : " << pMsg;
 
-		MessageBox(NULL, message.str().c_str(), "Alert", MB_OK);
+		//MessageBox(NULL, message.str().c_str(), "Alert", MB_OK);
 		return VK_FALSE;
 	}
 
@@ -118,12 +123,12 @@ namespace AlphonsoGraphicsEngine
 	void Renderer::CreateVulkanInstance()
 	{
 		// Returns implicitly enabled layers.
-		 mInstanceLayerProperties = vk::enumerateInstanceLayerProperties();
-		 if(!CheckValidationLayers(mValidationLayers, mInstanceLayerProperties))
-		 {
-			 std::cout << "Set Appropriate Supported Layer by checking vulkaninfo() log." << std::endl;
-			 exit(1);
-		 }
+		mInstanceLayerProperties = vk::enumerateInstanceLayerProperties();
+		if (!CheckValidationLayers(mValidationLayers, mInstanceLayerProperties))
+		{
+			std::cout << "Set Appropriate Supported Layer by checking vulkaninfo() log." << std::endl;
+			exit(1);
+		}
 		// Create application & Instance Information.
 		vk::ApplicationInfo applicationInfo(
 			"Alphonso Engine - Vulkan",
@@ -141,7 +146,7 @@ namespace AlphonsoGraphicsEngine
 			mValidationLayers.data(),
 			static_cast<uint32_t>(mInstanceExtensionNames.size()),
 			mInstanceExtensionNames.data());
-		
+
 		// Using Unique instance. Being UniqueInstance, it doesn't need to be explicitly destroyed.
 		mVulkanInstance = vk::createInstanceUnique(instanceInfo);
 	}
@@ -204,7 +209,7 @@ namespace AlphonsoGraphicsEngine
 			uint32_t* familyIndicesDataPtr;
 		} sharingModeUtil{ (graphicsQueueFamilyIndex != presentQueueFamilyIndex) ?
 							   SM{ vk::SharingMode::eConcurrent, 2u, mFamilyIndices.data() } : SM{ vk::SharingMode::eExclusive, 0u, static_cast<uint32_t*>(nullptr) } };
-		
+
 		auto capabilities = mPhysicalDevices[0].getSurfaceCapabilitiesKHR(*mSurface);
 		auto formats = mPhysicalDevices[0].getSurfaceFormatsKHR(*mSurface);
 
@@ -255,16 +260,8 @@ namespace AlphonsoGraphicsEngine
 
 		mRenderPass = mDevice->createRenderPassUnique(
 			vk::RenderPassCreateInfo{ {}, 1, &colorAttachment, 1, &subpass, 1, &subpassDependency }, nullptr, DispatchLoaderDynamic);
-		
+
 		/*
-
-		auto bindingDescription = Vertex::getBindingDescription();
-		auto attributeDescriptions = Vertex::getAttributeDescriptions();
-
-		vertexInputInfo.vertexBindingDescriptionCount = 1;
-		vertexInputInfo.vertexAttributeDescriptionCount = static_cast<uint32_t>(attributeDescriptions.size());
-		vertexInputInfo.pVertexBindingDescriptions = &bindingDescription;
-		vertexInputInfo.pVertexAttributeDescriptions = attributeDescriptions.data();
 
 		VkPipelineDepthStencilStateCreateInfo depthStencil = {};
 		depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
@@ -279,41 +276,60 @@ namespace AlphonsoGraphicsEngine
 
 	void Renderer::CreateDescriptorSetLayout()
 	{
+		mUBOLayoutBinding.binding = 0;
+		mUBOLayoutBinding.descriptorCount = 1;
+		mUBOLayoutBinding.descriptorType = vk::DescriptorType::eUniformBuffer;
+		mUBOLayoutBinding.pImmutableSamplers = nullptr;
+		mUBOLayoutBinding.stageFlags = vk::ShaderStageFlagBits::eVertex;
+
+		mSamplerLayoutBinding.binding = 1;
+		mSamplerLayoutBinding.descriptorCount = 1;
+		mSamplerLayoutBinding.descriptorType = vk::DescriptorType::eCombinedImageSampler;
+		mSamplerLayoutBinding.pImmutableSamplers = nullptr;
+		mSamplerLayoutBinding.stageFlags = vk::ShaderStageFlagBits::eFragment;
+
+		std::array<vk::DescriptorSetLayoutBinding, 2> bindings = { mUBOLayoutBinding, mSamplerLayoutBinding };
+		vk::DescriptorSetLayoutCreateInfo layoutInfo = {};
+		layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
+		layoutInfo.pBindings = bindings.data();
+
+		mDescriptorSetLayouts.push_back( mDevice->createDescriptorSetLayoutUnique(layoutInfo/*, nullptr, DispatchLoaderDynamic*/) );
 	}
 
 	void Renderer::CreateGraphicsPipeline()
 	{
 		std::string vertexShader = R"vertexshader(
         #version 450
-        #extension GL_ARB_separate_shader_objects : enable
-        out gl_PerVertex {
-            vec4 gl_Position;
-        };
-        layout(location = 0) out vec3 fragColor;
-        vec2 positions[3] = vec2[](
-            vec2(0.0, -0.5),
-            vec2(0.5, 0.5),
-            vec2(-0.5, 0.5)
-        );
-        vec3 colors[3] = vec3[](
-            vec3(1.0, 0.0, 0.0),
-            vec3(0.0, 1.0, 0.0),
-            vec3(0.0, 0.0, 1.0)
-        );
-        void main() {
-            gl_Position = vec4(positions[gl_VertexIndex], 0.0, 1.0);
-            fragColor = colors[gl_VertexIndex];
-        }
+		#extension GL_ARB_separate_shader_objects : enable
+
+		layout(binding = 0) uniform UniformBufferObject {
+		mat4 model;
+		mat4 view;
+		mat4 proj;
+		} ubo;
+
+		layout(location = 0) in vec2 inPosition;
+		layout(location = 1) in vec3 inColor;
+
+		layout(location = 0) out vec3 fragColor;
+
+		void main() {
+		gl_Position = ubo.proj * ubo.view * ubo.model * vec4(inPosition, 0.0, 1.0);
+		fragColor = inColor;
+		}
         )vertexshader";
 
 		std::string fragmentShader = R"fragmentShader(
         #version 450
-        #extension GL_ARB_separate_shader_objects : enable
-        layout(location = 0) in vec3 fragColor;
-        layout(location = 0) out vec4 outColor;
-        void main() {
-            outColor = vec4(fragColor, 1.0);
-        }
+		#extension GL_ARB_separate_shader_objects : enable
+
+		layout(location = 0) in vec3 fragColor;
+
+		layout(location = 0) out vec4 outColor;
+
+		void main() {
+		outColor = vec4(fragColor, 1.0);
+		}
         )fragmentShader";
 
 		shaderc::Compiler compiler;
@@ -358,7 +374,10 @@ namespace AlphonsoGraphicsEngine
 
 		auto pipelineShaderStages = std::vector<vk::PipelineShaderStageCreateInfo>{ vertShaderStageInfo, fragShaderStageInfo };
 
-		auto vertexInputInfo = vk::PipelineVertexInputStateCreateInfo{ {}, 0u, nullptr, 0u, nullptr };
+		auto bindingDescription = Vertex::getBindingDescription();
+		auto attributeDescriptions = Vertex::getAttributeDescriptions();
+
+		auto vertexInputInfo = vk::PipelineVertexInputStateCreateInfo{ {}, 1u, &bindingDescription, static_cast<uint32_t>(attributeDescriptions.size()), attributeDescriptions.data() };
 
 		auto inputAssembly = vk::PipelineInputAssemblyStateCreateInfo{ {}, vk::PrimitiveTopology::eTriangleList, false };
 
@@ -369,7 +388,7 @@ namespace AlphonsoGraphicsEngine
 		auto viewportState = vk::PipelineViewportStateCreateInfo{ {}, 1, &mViewport, 1, &scissor };
 
 		auto rasterizer = vk::PipelineRasterizationStateCreateInfo{ {}, /*depthClamp*/ false,
-			/*rasterizeDiscard*/ false, vk::PolygonMode::eFill, {},
+			/*rasterizeDiscard*/ false, vk::PolygonMode::eFill, vk::CullModeFlagBits::eBack,
 			/*frontFace*/ vk::FrontFace::eCounterClockwise, {}, {}, {}, {}, 1.0f };
 
 		auto multisampling = vk::PipelineMultisampleStateCreateInfo{ {}, vk::SampleCountFlagBits::e1, false, 1.0 };
@@ -383,11 +402,13 @@ namespace AlphonsoGraphicsEngine
 		auto colorBlending = vk::PipelineColorBlendStateCreateInfo
 		{ {}, /*logicOpEnable=*/false, vk::LogicOp::eCopy, /*attachmentCount=*/1, /*colourAttachments=*/&colorBlendAttachment };
 
-		auto pipelineLayout = mDevice->createPipelineLayoutUnique({}, nullptr, DispatchLoaderDynamic);
+		mPipelineLayout = mDevice->createPipelineLayoutUnique(vk::PipelineLayoutCreateInfo(
+			vk::PipelineLayoutCreateFlags(),static_cast<uint32_t>(mDescriptorSetLayouts.size()),
+			&*(*mDescriptorSetLayouts.data()),0,nullptr), nullptr, DispatchLoaderDynamic);
 
 		auto pipelineCreateInfo = vk::GraphicsPipelineCreateInfo{ {}, 2, pipelineShaderStages.data(),
 			&vertexInputInfo, &inputAssembly, nullptr, &viewportState, &rasterizer, &multisampling,
-			nullptr, &colorBlending, nullptr, *pipelineLayout, *mRenderPass, 0 };
+			nullptr, &colorBlending, nullptr, *mPipelineLayout, *mRenderPass, 0 };
 
 		mPipeline = mDevice->createGraphicsPipelineUnique({}, pipelineCreateInfo, nullptr, DispatchLoaderDynamic);
 	}
@@ -496,14 +517,14 @@ namespace AlphonsoGraphicsEngine
 		// Create Index buffer
 		// Copy index data to a buffer visible to the host (staging buffer)
 		stagingBuffers.indices.buffer = mDevice->createBufferUnique(vk::BufferCreateInfo(
-			vk::BufferCreateFlags(),IndexBufferSize,
-			vk::BufferUsageFlagBits::eTransferSrc,vk::SharingMode::eExclusive,
-			1,&graphicsQueueFamilyIndexUnsignedInt), nullptr, DispatchLoaderDynamic);
+			vk::BufferCreateFlags(), IndexBufferSize,
+			vk::BufferUsageFlagBits::eTransferSrc, vk::SharingMode::eExclusive,
+			1, &graphicsQueueFamilyIndexUnsignedInt), nullptr, DispatchLoaderDynamic);
 
 		vk::MemoryRequirements memRequirements;
 		memRequirements = mDevice->getBufferMemoryRequirements(*stagingBuffers.indices.buffer);
 		stagingBuffers.indices.memory = mDevice->allocateMemoryUnique(
-			vk::MemoryAllocateInfo(memRequirements.size,FindMemoryType(memRequirements.memoryTypeBits, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent)), nullptr, DispatchLoaderDynamic);
+			vk::MemoryAllocateInfo(memRequirements.size, FindMemoryType(memRequirements.memoryTypeBits, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent)), nullptr, DispatchLoaderDynamic);
 
 		data = mDevice->mapMemory(*stagingBuffers.indices.memory, 0, IndexBufferSize, vk::MemoryMapFlags());
 		memcpy(data, mIndices.data(), static_cast<size_t>(IndexBufferSize));
@@ -512,9 +533,9 @@ namespace AlphonsoGraphicsEngine
 
 		// Create destination buffer with device only visibility
 		IndexBufferOnGPU.buffer = mDevice->createBufferUnique(
-			vk::BufferCreateInfo(vk::BufferCreateFlags(),IndexBufferSize,
+			vk::BufferCreateInfo(vk::BufferCreateFlags(), IndexBufferSize,
 				vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eIndexBuffer, vk::SharingMode::eExclusive,
-				0,nullptr), nullptr, DispatchLoaderDynamic);
+				0, nullptr), nullptr, DispatchLoaderDynamic);
 
 		memRequirements = mDevice->getBufferMemoryRequirements(*IndexBufferOnGPU.buffer);
 		IndexBufferOnGPU.memory = mDevice->allocateMemoryUnique(
@@ -525,14 +546,110 @@ namespace AlphonsoGraphicsEngine
 
 	void Renderer::CreateUniformBuffers()
 	{
+		mUniformBuffers.resize(mSwapChainImages.size());
+		mUniformBuffersMemory.resize(mSwapChainImages.size());
+
+		for (size_t i = 0; i < mSwapChainImages.size(); i++) {
+			//createBuffer(bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, uniformBuffers[i], uniformBuffersMemory[i]);
+			// Vertex shader uniform buffer block
+			vk::MemoryAllocateInfo allocInfo = {};
+			allocInfo.pNext = nullptr;
+			allocInfo.allocationSize = 0;
+			allocInfo.memoryTypeIndex = 0;
+
+			// Create a new buffer
+			mUniformBuffers[i] = mDevice->createBufferUnique(
+				vk::BufferCreateInfo(vk::BufferCreateFlags(),sizeof(UniformBufferObject),
+					vk::BufferUsageFlagBits::eUniformBuffer), nullptr, DispatchLoaderDynamic);
+
+			vk::MemoryRequirements memoryRequirements;
+			// Get memory requirements including size, alignment and memory type 
+			memoryRequirements = mDevice->getBufferMemoryRequirements(*mUniformBuffers[i]);
+			allocInfo.allocationSize = memoryRequirements.size;
+			// Get the memory type index that supports host visible memory access
+			// Most implementations offer multiple memory types and selecting the correct one to allocate memory from is crucial
+			// We also want the buffer to be host coherent so we don't have to flush (or sync after every update.
+			// Note: This may affect performance so you might not want to do this in a real world application that updates buffers on a regular base
+			allocInfo.memoryTypeIndex = FindMemoryType(memoryRequirements.memoryTypeBits, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+			// Allocate memory for the uniform buffer
+			mUniformBuffersMemory[i] = mDevice->allocateMemoryUnique(allocInfo, nullptr, DispatchLoaderDynamic);
+			// Bind memory to buffer
+			mDevice->bindBufferMemory(*mUniformBuffers[i], *mUniformBuffersMemory[i], 0);
+
+			// Store information in the uniform's descriptor that is used by the descriptor set
+			//mUniformDataVS.descriptor.buffer = mUniformDataVS.buffer;
+			//mUniformDataVS.descriptor.offset = 0;
+			//mUniformDataVS.descriptor.range = sizeof(uboVS);
+		}
 	}
 
 	void Renderer::CreateDescriptorPool()
 	{
+		std::array<vk::DescriptorPoolSize, 2> poolSizes = {};
+		poolSizes[0].type = vk::DescriptorType::eUniformBuffer;
+		poolSizes[0].descriptorCount = static_cast<uint32_t>(mSwapChainImages.size());
+		poolSizes[1].type = vk::DescriptorType::eCombinedImageSampler;
+		poolSizes[1].descriptorCount = static_cast<uint32_t>(mSwapChainImages.size());
+
+		vk::DescriptorPoolCreateInfo poolInfo = {};
+		poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
+		poolInfo.pPoolSizes = poolSizes.data();
+		poolInfo.maxSets = static_cast<uint32_t>(mSwapChainImages.size());
+
+		mDescriptorPool = mDevice->createDescriptorPoolUnique(poolInfo, nullptr, DispatchLoaderDynamic);
 	}
 
 	void Renderer::CreateDescriptorSets()
 	{
+		mDescriptorSets.resize(mSwapChainImages.size());
+
+		mDescriptorSets = mDevice->allocateDescriptorSetsUnique(
+			vk::DescriptorSetAllocateInfo(*mDescriptorPool,
+				static_cast<uint32_t>(mDescriptorSetLayouts.size()),
+				&*(*mDescriptorSetLayouts.data())));
+
+		/*std::vector<vk::DescriptorSetLayout> layouts(mSwapChainImages.size(), *mDescriptorSetLayouts.data());
+		VkDescriptorSetAllocateInfo allocInfo = {};
+		allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+		allocInfo.descriptorPool = descriptorPool;
+		allocInfo.descriptorSetCount = static_cast<uint32_t>(swapChainImages.size());
+		allocInfo.pSetLayouts = layouts.data();
+
+		
+		if (vkAllocateDescriptorSets(device, &allocInfo, descriptorSets.data()) != VK_SUCCESS) {
+			throw std::runtime_error("failed to allocate descriptor sets!");
+		}*/
+
+		for (size_t i = 0; i < mSwapChainImages.size(); i++)
+		{
+			vk::DescriptorBufferInfo bufferInfo = {};
+			bufferInfo.buffer = *mUniformBuffers[i];
+			bufferInfo.offset = 0;
+			bufferInfo.range = sizeof(UniformBufferObject);
+
+			vk::DescriptorImageInfo imageInfo = {};
+			imageInfo.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+			imageInfo.imageView = mTextureImageView;
+			imageInfo.sampler = mTextureSampler;
+
+			std::array<vk::WriteDescriptorSet, 2> descriptorWrites = {};
+
+			descriptorWrites[0].dstSet = *mDescriptorSets[i];
+			descriptorWrites[0].dstBinding = 0;
+			descriptorWrites[0].dstArrayElement = 0;
+			descriptorWrites[0].descriptorType = vk::DescriptorType::eUniformBuffer;
+			descriptorWrites[0].descriptorCount = 1;
+			descriptorWrites[0].pBufferInfo = &bufferInfo;
+
+			descriptorWrites[1].dstSet = *mDescriptorSets[i];
+			descriptorWrites[1].dstBinding = 1;
+			descriptorWrites[1].dstArrayElement = 0;
+			descriptorWrites[1].descriptorType = vk::DescriptorType::eCombinedImageSampler;
+			descriptorWrites[1].descriptorCount = 1;
+			descriptorWrites[1].pImageInfo = &imageInfo;
+
+			mDevice->updateDescriptorSets(static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data(), 0, nullptr);
+		}
 	}
 
 	void Renderer::CreateCommandPool()
@@ -545,7 +662,7 @@ namespace AlphonsoGraphicsEngine
 		mCommandBuffers.resize(mFrameBuffers.size());
 
 		mCommandBuffers = mDevice->allocateCommandBuffersUnique(vk::CommandBufferAllocateInfo(
-				mCommandPool.get(), vk::CommandBufferLevel::ePrimary, static_cast<uint32_t>(mFrameBuffers.size())));
+			mCommandPool.get(), vk::CommandBufferLevel::ePrimary, static_cast<uint32_t>(mFrameBuffers.size())));
 
 		mGraphicsQueue = mDevice->getQueue(static_cast<uint32_t>(graphicsQueueFamilyIndex), 0);
 		mPresentQueue = mDevice->getQueue(static_cast<uint32_t>(presentQueueFamilyIndex), 0);
@@ -563,12 +680,16 @@ namespace AlphonsoGraphicsEngine
 				vk::Rect2D{ { 0, 0 }, mSwapChainExtent }, static_cast<uint32_t>(clearValues.size()), clearValues.data() };
 
 			mCommandBuffers[i]->beginRenderPass(renderPassBeginInfo, vk::SubpassContents::eInline);
-			mCommandBuffers[i]->bindPipeline(vk::PipelineBindPoint::eGraphics, mPipeline.get()); 
-			//TODO: Bind Vertex Buffers
-			//TODO: Bind Index Buffers
+			mCommandBuffers[i]->bindPipeline(vk::PipelineBindPoint::eGraphics, mPipeline.get());
+
+			vk::DeviceSize offsets = 0;
+			mCommandBuffers[i]->bindVertexBuffers(0, 1, &(*VertexBufferOnGPU.buffer), &offsets);
+			mCommandBuffers[i]->bindIndexBuffer(*IndexBufferOnGPU.buffer, 0, vk::IndexType::eUint32);
+			mCommandBuffers[i]->bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *mPipelineLayout, 0, 1, &*mDescriptorSets[i], 0, nullptr);
 			//TODO: Bind Descriptor Sets
 			// Use DrawIndexed rather than draw.
-			mCommandBuffers[i]->draw(3, 1, 0, 0);
+			mCommandBuffers[i]->drawIndexed(static_cast<uint32_t>(mIndices.size()), 1, 0, 0, 0);
+			//mCommandBuffers[i]->draw(3, 1, 0, 0);
 			mCommandBuffers[i]->endRenderPass();
 			mCommandBuffers[i]->end();
 		}
@@ -580,7 +701,26 @@ namespace AlphonsoGraphicsEngine
 		mImageAvailableSemaphore = mDevice->createSemaphoreUnique(semaphoreCreateInfo, nullptr, DispatchLoaderDynamic);
 		mRenderFinishedSemaphore = mDevice->createSemaphoreUnique(semaphoreCreateInfo, nullptr, DispatchLoaderDynamic);
 	}
-	
+
+	void Renderer::UpdateUniformBuffer(vk::ResultValue<uint32_t> imageIndex)
+	{
+		static auto startTime = std::chrono::high_resolution_clock::now();
+
+		auto currentTime = std::chrono::high_resolution_clock::now();
+		float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
+
+		UniformBufferObject ubo = {};
+		ubo.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+		ubo.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+		ubo.proj = glm::perspective(glm::radians(45.0f), mSwapChainExtent.width / (float)mSwapChainExtent.height, 0.1f, 10.0f);
+		ubo.proj[1][1] *= -1;
+
+		void* data;
+		data = mDevice->mapMemory(*mUniformBuffersMemory[imageIndex.value], 0, sizeof(ubo), vk::MemoryMapFlags());
+		memcpy(data, &ubo, sizeof(ubo));
+		mDevice->unmapMemory(*mUniformBuffersMemory[imageIndex.value]);
+	}
+
 	std::vector<const char*> Renderer::GetRequiredExtensions()
 	{
 		uint32_t glfwExtensionCount = 0;
@@ -657,6 +797,8 @@ namespace AlphonsoGraphicsEngine
 		auto imageIndex = mDevice->acquireNextImageKHR(mSwapChain.get(),
 			(std::numeric_limits<uint64_t>::max)(), mImageAvailableSemaphore.get(), {});
 
+		UpdateUniformBuffer(imageIndex);
+
 		vk::PipelineStageFlags waitStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput;
 
 		auto submitInfo = vk::SubmitInfo{ 1, &mImageAvailableSemaphore.get(), &waitStageMask, 1,
@@ -726,15 +868,4 @@ namespace AlphonsoGraphicsEngine
 		}
 		throw std::runtime_error("failed to find suitable memory type!");
 	}
-
-	/*void Renderer::CopyBuffer(vk::UniqueBuffer& srcBuffer, vk::UniqueBuffer& dstBuffer, vk::DeviceSize size) {
-		vk::UniqueCommandBuffer commandBuffer = beginSingleTimeCommands();
-
-		vk::BufferCopy copyRegion = {};
-		copyRegion.size = size;
-		commandBuffer->copyBuffer(srcBuffer.get(), dstBuffer.get(), 1, copyRegion);
-		vkCmdCopyBuffer(*commandBuffer, srcBuffer, dstBuffer, 1, &copyRegion);
-
-		endSingleTimeCommands(commandBuffer);
-	}*/
 }

@@ -104,6 +104,9 @@ namespace AlphonsoGraphicsEngine
 		CreateGraphicsPipeline();
 		CreateCommandPool();
 		CreateFramebuffers();
+		CreateTextureImage();
+		CreateTextureImageView();
+		CreateTextureSampler();
 		LoadModel();
 		CreateVertexBuffer();
 		CreateIndexBuffer();
@@ -186,8 +189,6 @@ namespace AlphonsoGraphicsEngine
 
 		mFamilyIndices = { static_cast<uint32_t>(graphicsQueueFamilyIndex), static_cast<uint32_t>(presentQueueFamilyIndex) };
 
-		//mFamilyIndices = { uniqueQueueFamilyIndices.begin(), uniqueQueueFamilyIndices.end() };
-
 		// Create a Unique Device. It doesn't need to be explicitly destroyed.
 		float queuePriority = 0.0f;
 		for (size_t queueFamilyIndex : uniqueQueueFamilyIndices)
@@ -196,8 +197,11 @@ namespace AlphonsoGraphicsEngine
 				static_cast<uint32_t>(queueFamilyIndex), 1, &queuePriority });
 		}
 
+		vk::PhysicalDeviceFeatures deviceFeatures = {};
+		deviceFeatures.samplerAnisotropy = VK_TRUE;
+
 		mDevice = mPhysicalDevices[0].createDeviceUnique(vk::DeviceCreateInfo(
-			vk::DeviceCreateFlags(), static_cast<uint32_t>(mdeviceQueueCreateInfo.size()), mdeviceQueueCreateInfo.data(), 0, nullptr, static_cast<uint32_t>(mdeviceExtensions.size()), mdeviceExtensions.data()),
+			vk::DeviceCreateFlags(), static_cast<uint32_t>(mdeviceQueueCreateInfo.size()), mdeviceQueueCreateInfo.data(), 0, nullptr, static_cast<uint32_t>(mdeviceExtensions.size()), mdeviceExtensions.data(), &deviceFeatures),
 			nullptr, DispatchLoaderDynamic);
 	}
 
@@ -293,7 +297,7 @@ namespace AlphonsoGraphicsEngine
 		layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
 		layoutInfo.pBindings = bindings.data();
 
-		mDescriptorSetLayouts.push_back( mDevice->createDescriptorSetLayoutUnique(layoutInfo/*, nullptr, DispatchLoaderDynamic*/) );
+		mDescriptorSetLayout = mDevice->createDescriptorSetLayoutUnique(layoutInfo, nullptr, DispatchLoaderDynamic);
 	}
 
 	void Renderer::CreateGraphicsPipeline()
@@ -308,14 +312,17 @@ namespace AlphonsoGraphicsEngine
 		mat4 proj;
 		} ubo;
 
-		layout(location = 0) in vec2 inPosition;
+		layout(location = 0) in vec3 inPosition;
 		layout(location = 1) in vec3 inColor;
+		layout(location = 2) in vec2 inTexCoord;
 
 		layout(location = 0) out vec3 fragColor;
+		layout(location = 1) out vec2 fragTexCoord;
 
 		void main() {
-		gl_Position = ubo.proj * ubo.view * ubo.model * vec4(inPosition, 0.0, 1.0);
+		gl_Position = ubo.proj * ubo.view * ubo.model * vec4(inPosition, 1.0);
 		fragColor = inColor;
+		fragTexCoord = inTexCoord;
 		}
         )vertexshader";
 
@@ -323,12 +330,15 @@ namespace AlphonsoGraphicsEngine
         #version 450
 		#extension GL_ARB_separate_shader_objects : enable
 
+		layout(binding = 1) uniform sampler2D texSampler;
+
 		layout(location = 0) in vec3 fragColor;
+		layout(location = 1) in vec2 fragTexCoord;
 
 		layout(location = 0) out vec4 outColor;
 
 		void main() {
-		outColor = vec4(fragColor, 1.0);
+		outColor = texture(texSampler, fragTexCoord);
 		}
         )fragmentShader";
 
@@ -403,8 +413,8 @@ namespace AlphonsoGraphicsEngine
 		{ {}, /*logicOpEnable=*/false, vk::LogicOp::eCopy, /*attachmentCount=*/1, /*colourAttachments=*/&colorBlendAttachment };
 
 		mPipelineLayout = mDevice->createPipelineLayoutUnique(vk::PipelineLayoutCreateInfo(
-			vk::PipelineLayoutCreateFlags(),static_cast<uint32_t>(mDescriptorSetLayouts.size()),
-			&*(*mDescriptorSetLayouts.data()),0,nullptr), nullptr, DispatchLoaderDynamic);
+			vk::PipelineLayoutCreateFlags(), static_cast<uint32_t>(1),
+			&*mDescriptorSetLayout, 0, nullptr), nullptr, DispatchLoaderDynamic);
 
 		auto pipelineCreateInfo = vk::GraphicsPipelineCreateInfo{ {}, 2, pipelineShaderStages.data(),
 			&vertexInputInfo, &inputAssembly, nullptr, &viewportState, &rasterizer, &multisampling,
@@ -421,6 +431,73 @@ namespace AlphonsoGraphicsEngine
 			mFrameBuffers[i] = mDevice->createFramebufferUnique(vk::FramebufferCreateInfo
 				{ {}, mRenderPass.get(), 1, &(*mImageViews[i]), mSwapChainExtent.width, mSwapChainExtent.height, 1 }, nullptr, DispatchLoaderDynamic);
 		}
+	}
+
+	void Renderer::CreateTextureImage()
+	{
+		void* data;
+		graphicsQueueFamilyIndexUnsignedInt = static_cast<uint32_t>(graphicsQueueFamilyIndex);
+		int texWidth, texHeight, texChannels;
+
+		stbi_uc* pixels = stbi_load(TEXTURE_PATH.c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
+		
+		vk::DeviceSize imageSize = static_cast<uint64_t>(texWidth) * static_cast<uint64_t>(texHeight) * static_cast<uint64_t>(4);
+		
+		if (!pixels) 
+		{
+			throw std::runtime_error("Failed to load Texture Image!");
+		}
+
+		// Create Texture Image Staging Buffer & Memory
+		TextureImageStagingBuffer.buffer = mDevice->createBufferUnique(
+			vk::BufferCreateInfo(vk::BufferCreateFlags(), imageSize,
+				vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eTransferSrc, vk::SharingMode::eExclusive,
+				1U, &graphicsQueueFamilyIndexUnsignedInt), nullptr, DispatchLoaderDynamic);
+
+		vk::MemoryRequirements memRequirements;
+		memRequirements = mDevice->getBufferMemoryRequirements(*TextureImageStagingBuffer.buffer);
+
+		TextureImageStagingBuffer.memory = mDevice->allocateMemoryUnique(
+			vk::MemoryAllocateInfo(memRequirements.size, FindMemoryType(memRequirements.memoryTypeBits, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent)), nullptr, DispatchLoaderDynamic);
+
+		data = mDevice->mapMemory(*TextureImageStagingBuffer.memory, 0, imageSize, vk::MemoryMapFlags());
+		memcpy(data, pixels, static_cast<size_t>(imageSize));
+		mDevice->unmapMemory(*TextureImageStagingBuffer.memory);
+		mDevice->bindBufferMemory(*TextureImageStagingBuffer.buffer, *TextureImageStagingBuffer.memory, 0);
+
+		stbi_image_free(pixels);
+
+		CreateImage(texWidth, texHeight,
+			vk::Format::eR8G8B8A8Unorm, vk::ImageTiling::eOptimal, vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled,
+			vk::MemoryPropertyFlagBits::eDeviceLocal, mTextureImage, mTextureImageMemory);
+
+		TransitionImageLayout(mTextureImage, vk::Format::eR8G8B8A8Unorm, vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal);
+		CopyBufferToImage(*TextureImageStagingBuffer.buffer, *mTextureImage, static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight));
+		TransitionImageLayout(mTextureImage, vk::Format::eR8G8B8A8Unorm, vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eShaderReadOnlyOptimal);
+	}
+
+	void Renderer::CreateTextureImageView()
+	{
+		*mTextureImageView = CreateImageView(*mTextureImage, vk::Format::eR8G8B8A8Unorm, vk::ImageAspectFlagBits::eColor);
+	}
+
+	void Renderer::CreateTextureSampler()
+	{
+		vk::SamplerCreateInfo samplerInfo = {};
+		samplerInfo.magFilter = vk::Filter::eLinear;
+		samplerInfo.minFilter = vk::Filter::eLinear;
+		samplerInfo.addressModeU = vk::SamplerAddressMode::eRepeat;
+		samplerInfo.addressModeV = vk::SamplerAddressMode::eRepeat;
+		samplerInfo.addressModeW = vk::SamplerAddressMode::eRepeat;
+		samplerInfo.anisotropyEnable = VK_TRUE;
+		samplerInfo.maxAnisotropy = 16;
+		samplerInfo.borderColor = vk::BorderColor::eIntOpaqueBlack;
+		samplerInfo.unnormalizedCoordinates = VK_FALSE;
+		samplerInfo.compareEnable = VK_FALSE;
+		samplerInfo.compareOp = vk::CompareOp::eAlways;
+		samplerInfo.mipmapMode = vk::SamplerMipmapMode::eLinear;
+
+		mTextureSampler = mDevice->createSamplerUnique(samplerInfo, nullptr, DispatchLoaderDynamic);
 	}
 
 	void Renderer::LoadModel()
@@ -550,7 +627,6 @@ namespace AlphonsoGraphicsEngine
 		mUniformBuffersMemory.resize(mSwapChainImages.size());
 
 		for (size_t i = 0; i < mSwapChainImages.size(); i++) {
-			//createBuffer(bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, uniformBuffers[i], uniformBuffersMemory[i]);
 			// Vertex shader uniform buffer block
 			vk::MemoryAllocateInfo allocInfo = {};
 			allocInfo.pNext = nullptr;
@@ -575,11 +651,6 @@ namespace AlphonsoGraphicsEngine
 			mUniformBuffersMemory[i] = mDevice->allocateMemoryUnique(allocInfo, nullptr, DispatchLoaderDynamic);
 			// Bind memory to buffer
 			mDevice->bindBufferMemory(*mUniformBuffers[i], *mUniformBuffersMemory[i], 0);
-
-			// Store information in the uniform's descriptor that is used by the descriptor set
-			//mUniformDataVS.descriptor.buffer = mUniformDataVS.buffer;
-			//mUniformDataVS.descriptor.offset = 0;
-			//mUniformDataVS.descriptor.range = sizeof(uboVS);
 		}
 	}
 
@@ -602,23 +673,10 @@ namespace AlphonsoGraphicsEngine
 	void Renderer::CreateDescriptorSets()
 	{
 		mDescriptorSets.resize(mSwapChainImages.size());
+		std::vector<vk::DescriptorSetLayout> layouts(mSwapChainImages.size(), *mDescriptorSetLayout);
 
 		mDescriptorSets = mDevice->allocateDescriptorSetsUnique(
-			vk::DescriptorSetAllocateInfo(*mDescriptorPool,
-				static_cast<uint32_t>(mDescriptorSetLayouts.size()),
-				&*(*mDescriptorSetLayouts.data())));
-
-		/*std::vector<vk::DescriptorSetLayout> layouts(mSwapChainImages.size(), *mDescriptorSetLayouts.data());
-		VkDescriptorSetAllocateInfo allocInfo = {};
-		allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-		allocInfo.descriptorPool = descriptorPool;
-		allocInfo.descriptorSetCount = static_cast<uint32_t>(swapChainImages.size());
-		allocInfo.pSetLayouts = layouts.data();
-
-		
-		if (vkAllocateDescriptorSets(device, &allocInfo, descriptorSets.data()) != VK_SUCCESS) {
-			throw std::runtime_error("failed to allocate descriptor sets!");
-		}*/
+			vk::DescriptorSetAllocateInfo(*mDescriptorPool, static_cast<uint32_t>(layouts.size()),layouts.data()));
 
 		for (size_t i = 0; i < mSwapChainImages.size(); i++)
 		{
@@ -629,8 +687,8 @@ namespace AlphonsoGraphicsEngine
 
 			vk::DescriptorImageInfo imageInfo = {};
 			imageInfo.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
-			imageInfo.imageView = mTextureImageView;
-			imageInfo.sampler = mTextureSampler;
+			imageInfo.imageView = *mTextureImageView;
+			imageInfo.sampler = *mTextureSampler;
 
 			std::array<vk::WriteDescriptorSet, 2> descriptorWrites = {};
 
@@ -686,10 +744,7 @@ namespace AlphonsoGraphicsEngine
 			mCommandBuffers[i]->bindVertexBuffers(0, 1, &(*VertexBufferOnGPU.buffer), &offsets);
 			mCommandBuffers[i]->bindIndexBuffer(*IndexBufferOnGPU.buffer, 0, vk::IndexType::eUint32);
 			mCommandBuffers[i]->bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *mPipelineLayout, 0, 1, &*mDescriptorSets[i], 0, nullptr);
-			//TODO: Bind Descriptor Sets
-			// Use DrawIndexed rather than draw.
 			mCommandBuffers[i]->drawIndexed(static_cast<uint32_t>(mIndices.size()), 1, 0, 0, 0);
-			//mCommandBuffers[i]->draw(3, 1, 0, 0);
 			mCommandBuffers[i]->endRenderPass();
 			mCommandBuffers[i]->end();
 		}
@@ -856,6 +911,52 @@ namespace AlphonsoGraphicsEngine
 		throw std::runtime_error("Could not find queues for both graphics or present -> terminating");
 	}
 
+	void Renderer::CreateImage(uint32_t width, uint32_t height, vk::Format format, vk::ImageTiling tiling, vk::ImageUsageFlags usageFlags, vk::MemoryPropertyFlagBits properties, vk::UniqueHandle<vk::Image, vk::DispatchLoaderDynamic>& image, vk::UniqueHandle<vk::DeviceMemory, vk::DispatchLoaderDynamic>& imageMemory)
+	{
+		vk::ImageCreateInfo imageInfo = {};
+		imageInfo.imageType = vk::ImageType::e2D;
+		imageInfo.extent.width = width;
+		imageInfo.extent.height = height;
+		imageInfo.extent.depth = 1;
+		imageInfo.mipLevels = 1;
+		imageInfo.arrayLayers = 1;
+		imageInfo.format = format;
+		imageInfo.tiling = tiling;
+		imageInfo.initialLayout = vk::ImageLayout::eUndefined;
+		imageInfo.usage = usageFlags;
+		imageInfo.samples = vk::SampleCountFlagBits::e1;
+		imageInfo.sharingMode = vk::SharingMode::eExclusive;
+
+		image = mDevice->createImageUnique(imageInfo, nullptr, DispatchLoaderDynamic);
+
+		vk::MemoryRequirements memRequirements;
+		memRequirements = mDevice->getImageMemoryRequirements(*image);
+
+		vk::MemoryAllocateInfo allocInfo = {};
+		allocInfo.allocationSize = memRequirements.size;
+		allocInfo.memoryTypeIndex = FindMemoryType(memRequirements.memoryTypeBits, properties);
+
+		imageMemory = mDevice->allocateMemoryUnique(allocInfo, nullptr, DispatchLoaderDynamic);
+		mDevice->bindImageMemory(*image, *imageMemory, 0);
+	}
+
+	vk::ImageView Renderer::CreateImageView(vk::Image image, vk::Format format, vk::ImageAspectFlags aspectFlags)
+	{
+		vk::ImageViewCreateInfo viewInfo = {};
+		viewInfo.image = image;
+		viewInfo.viewType = vk::ImageViewType::e2D;
+		viewInfo.format = format;
+		viewInfo.subresourceRange.aspectMask = aspectFlags;
+		viewInfo.subresourceRange.baseMipLevel = 0;
+		viewInfo.subresourceRange.levelCount = 1;
+		viewInfo.subresourceRange.baseArrayLayer = 0;
+		viewInfo.subresourceRange.layerCount = 1;
+
+		vk::ImageView imageView;
+		imageView = mDevice->createImageView(viewInfo);
+		return imageView;
+	}
+
 	uint32_t Renderer::FindMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties)
 	{
 		vk::PhysicalDeviceMemoryProperties memProperties;
@@ -867,5 +968,128 @@ namespace AlphonsoGraphicsEngine
 			}
 		}
 		throw std::runtime_error("failed to find suitable memory type!");
+	}
+	void Renderer::TransitionImageLayout(vk::UniqueHandle<vk::Image, vk::DispatchLoaderDynamic>& image, vk::Format format, vk::ImageLayout oldLayout, vk::ImageLayout newLayout)
+	{
+		format;
+		vk::CommandBuffer commandBuffer = BeginSingleTimeCommands();
+
+		vk::ImageMemoryBarrier barrier = {};
+		barrier.oldLayout = oldLayout;
+		barrier.newLayout = newLayout;
+		barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		barrier.image = *image;
+
+		if (newLayout == vk::ImageLayout::eDepthStencilAttachmentOptimal) 
+		{
+			barrier.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eDepth;
+			if (HasStencilComponent(format))
+			{
+				barrier.subresourceRange.aspectMask |= vk::ImageAspectFlagBits::eStencil;
+			}
+		}
+		else
+		{
+			barrier.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+		}
+
+		barrier.subresourceRange.baseMipLevel = 0;
+		barrier.subresourceRange.levelCount = 1;
+		barrier.subresourceRange.baseArrayLayer = 0;
+		barrier.subresourceRange.layerCount = 1;
+
+		vk::PipelineStageFlags sourceStage;
+		vk::PipelineStageFlags destinationStage;
+
+		if (oldLayout == vk::ImageLayout::eUndefined && newLayout == vk::ImageLayout::eTransferDstOptimal)
+		{
+			barrier.srcAccessMask = static_cast<vk::AccessFlags>(0);
+			barrier.dstAccessMask = vk::AccessFlagBits::eTransferWrite;
+			sourceStage = vk::PipelineStageFlagBits::eTopOfPipe;
+			destinationStage = vk::PipelineStageFlagBits::eTransfer;
+		}
+		else if (oldLayout == vk::ImageLayout::eTransferDstOptimal && newLayout == vk::ImageLayout::eShaderReadOnlyOptimal)
+		{
+			barrier.srcAccessMask = vk::AccessFlagBits::eTransferWrite;
+			barrier.dstAccessMask = vk::AccessFlagBits::eShaderRead;
+			sourceStage = vk::PipelineStageFlagBits::eTransfer;
+			destinationStage = vk::PipelineStageFlagBits::eFragmentShader;
+		}
+		else if (oldLayout == vk::ImageLayout::eUndefined && newLayout == vk::ImageLayout::eDepthStencilAttachmentOptimal)
+		{
+			barrier.srcAccessMask = static_cast<vk::AccessFlags>(0);
+			barrier.dstAccessMask = vk::AccessFlagBits::eDepthStencilAttachmentRead | vk::AccessFlagBits::eDepthStencilAttachmentWrite;
+
+			sourceStage = vk::PipelineStageFlagBits::eTopOfPipe;
+			destinationStage = vk::PipelineStageFlagBits::eEarlyFragmentTests;
+		}
+		else
+		{
+			throw std::invalid_argument("Unsupported Layout Transition!");
+		}
+		commandBuffer.pipelineBarrier(sourceStage, destinationStage,
+			vk::DependencyFlags(), static_cast<uint32_t>(0), nullptr, static_cast<uint32_t>(0), nullptr, static_cast<uint32_t>(1), &barrier);
+
+		EndSingleTimeCommands(commandBuffer);
+	}
+
+	vk::CommandBuffer Renderer::BeginSingleTimeCommands()
+	{
+		vk::CommandBufferAllocateInfo allocInfo = {};
+		allocInfo.level = vk::CommandBufferLevel::ePrimary;
+		allocInfo.commandPool = *mCommandPool;
+		allocInfo.commandBufferCount = 1;
+
+		vk::CommandBuffer commandBuffer;
+		mDevice->allocateCommandBuffers(&allocInfo, &commandBuffer);
+
+		vk::CommandBufferBeginInfo beginInfo = {};
+		beginInfo.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit;
+
+		commandBuffer.begin(beginInfo);
+
+		return commandBuffer;
+	}
+
+	void Renderer::EndSingleTimeCommands(vk::CommandBuffer commandBuffer)
+	{
+		mGraphicsQueue = mDevice->getQueue(static_cast<uint32_t>(graphicsQueueFamilyIndex), 0);
+
+		vkEndCommandBuffer(commandBuffer);
+
+		vk::SubmitInfo submitInfo = {};
+		submitInfo.commandBufferCount = 1;
+		submitInfo.pCommandBuffers = &commandBuffer;
+
+		mGraphicsQueue.submit(submitInfo, {});
+		mGraphicsQueue.waitIdle();
+
+		mDevice->freeCommandBuffers(*mCommandPool, commandBuffer);
+	}
+
+	void Renderer::CopyBufferToImage(vk::Buffer buffer, vk::Image image, uint32_t width, uint32_t height)
+	{
+		vk::CommandBuffer commandBuffer = BeginSingleTimeCommands();
+
+		vk::BufferImageCopy region = {};
+		region.bufferOffset = 0;
+		region.bufferRowLength = 0;
+		region.bufferImageHeight = 0;
+		region.imageSubresource.aspectMask = vk::ImageAspectFlagBits::eColor;
+		region.imageSubresource.mipLevel = 0;
+		region.imageSubresource.baseArrayLayer = 0;
+		region.imageSubresource.layerCount = 1;
+		region.imageOffset = { 0, 0, 0 };
+		region.imageExtent = { width, height, 1 };
+
+		commandBuffer.copyBufferToImage(buffer, image, vk::ImageLayout::eTransferDstOptimal, 1, &region);
+
+		EndSingleTimeCommands(commandBuffer);
+	}
+
+	bool Renderer::HasStencilComponent(vk::Format format)
+	{
+		return format == vk::Format::eD32SfloatS8Uint || format == vk::Format::eD24UnormS8Uint;
 	}
 }

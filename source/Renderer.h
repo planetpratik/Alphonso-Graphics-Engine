@@ -119,6 +119,9 @@ namespace AlphonsoGraphicsEngine
 		void CreateGraphicsPipeline();
 		void CreateCommandPool();
 		void CreateFramebuffers();
+		void CreateTextureImage();
+		void CreateTextureImageView();
+		void CreateTextureSampler();
 		void LoadModel();
 		void CreateVertexBuffer();
 		void CreateIndexBuffer();
@@ -128,8 +131,15 @@ namespace AlphonsoGraphicsEngine
 		void CreateCommandBuffers();
 		void CreateSemaphores();
 		void UpdateUniformBuffer(vk::ResultValue<uint32_t> imageIndex);
+
 		uint32_t FindMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties);
-		//void CopyBuffer(vk::UniqueBuffer& srcBuffer, vk::UniqueBuffer& dstBuffer, vk::DeviceSize size);
+		void CreateImage(uint32_t width, uint32_t height, vk::Format format, vk::ImageTiling tiling, vk::ImageUsageFlags usageFlags, vk::MemoryPropertyFlagBits properties, vk::UniqueHandle<vk::Image, vk::DispatchLoaderDynamic>& image, vk::UniqueHandle<vk::DeviceMemory, vk::DispatchLoaderDynamic>& imageMemory);
+		vk::ImageView CreateImageView(vk::Image image, vk::Format format, vk::ImageAspectFlags aspectFlags);
+		void TransitionImageLayout(vk::UniqueHandle<vk::Image, vk::DispatchLoaderDynamic>& image, vk::Format format, vk::ImageLayout oldLayout, vk::ImageLayout newLayout);
+		vk::CommandBuffer BeginSingleTimeCommands();
+		void EndSingleTimeCommands(vk::CommandBuffer commandBuffer);
+		void CopyBufferToImage(vk::Buffer buffer, vk::Image image, uint32_t width, uint32_t height);
+		bool Renderer::HasStencilComponent(vk::Format format);
 
 		GameClock mGameClock;
 		GameTime mGameTime;
@@ -143,7 +153,8 @@ namespace AlphonsoGraphicsEngine
 			"VK_KHR_swapchain"
 		};
 
-		const std::string MODEL_PATH = "../../Assets/Models/cube.objs";
+		const std::string MODEL_PATH = "../../Assets/Models/chalet.objs";
+		const std::string TEXTURE_PATH = "../../Assets/Textures/chalet.jpg";
 
 		std::vector<const char*> mInstanceExtensionNames;
 	private:
@@ -151,6 +162,8 @@ namespace AlphonsoGraphicsEngine
 			vk::UniqueHandle<vk::DeviceMemory, vk::DispatchLoaderDynamic> memory;
 			vk::UniqueHandle<vk::Buffer, vk::DispatchLoaderDynamic> buffer;
 		};
+
+		StagingBuffer TextureImageStagingBuffer;
 
 		struct {
 			StagingBuffer vertices;
@@ -178,12 +191,6 @@ namespace AlphonsoGraphicsEngine
 			alignas(16) glm::mat4 proj;
 		};
 
-		/*struct {
-			vk::UniqueHandle<vk::DeviceMemory, vk::DispatchLoaderDynamic> memory;
-			vk::UniqueHandle<vk::Buffer, vk::DispatchLoaderDynamic> buffer;
-			vk::DescriptorBufferInfo descriptor;
-		} UniformData;*/
-
 		uint32_t imageCount = 0U;
 		GLFWwindow* mWindow = nullptr;
 		vk::UniqueInstance mVulkanInstance;
@@ -201,8 +208,6 @@ namespace AlphonsoGraphicsEngine
 		vk::UniqueDeviceMemory mVertexBufferMemory;
 		vk::UniqueBuffer mIndexBuffer;
 		vk::UniqueDeviceMemory mIndexBufferMemory;
-		vk::ImageView mTextureImageView;
-		vk::Sampler mTextureSampler;
 		
 		vk::UniqueHandle<vk::SwapchainKHR, vk::DispatchLoaderDynamic> mSwapChain;
 		vk::Format mSwapChainImageFormat;
@@ -219,6 +224,11 @@ namespace AlphonsoGraphicsEngine
 		vk::UniqueHandle<vk::Semaphore, vk::DispatchLoaderDynamic> mImageAvailableSemaphore;
 		vk::UniqueHandle<vk::Semaphore, vk::DispatchLoaderDynamic> mRenderFinishedSemaphore;
 		vk::UniqueHandle<vk::DescriptorPool, vk::DispatchLoaderDynamic> mDescriptorPool;
+		vk::UniqueHandle<vk::Image, vk::DispatchLoaderDynamic> mTextureImage;
+		vk::UniqueHandle<vk::Sampler, vk::DispatchLoaderDynamic> mTextureSampler;
+		vk::UniqueHandle<vk::DeviceMemory, vk::DispatchLoaderDynamic> mTextureImageMemory;
+		vk::UniqueHandle<vk::ImageView, vk::DispatchLoaderDynamic> mTextureImageView;
+		vk::UniqueHandle<vk::DescriptorSetLayout, vk::DispatchLoaderDynamic> mDescriptorSetLayout;
 
 		std::set<size_t> uniqueQueueFamilyIndices;
 		std::vector<vk::LayerProperties> mInstanceLayerProperties;
@@ -230,14 +240,11 @@ namespace AlphonsoGraphicsEngine
 		std::vector<vk::UniqueImageView> mImageViews;
 		std::vector<vk::UniqueHandle<vk::Framebuffer, vk::DispatchLoaderDynamic>> mFrameBuffers;
 		std::vector<vk::UniqueCommandBuffer> mCommandBuffers;
-		//std::vector<vk::UniqueHandle<vk::DescriptorSetLayout, vk::DispatchLoaderDynamic>> mDescriptorSetLayouts;
-		std::vector<vk::UniqueDescriptorSetLayout> mDescriptorSetLayouts;
 		std::vector<vk::UniqueDescriptorSet> mDescriptorSets;
-		//std::vector<vk::DescriptorSetLayout> mDescriptorSetLayouts;
 		std::vector<vk::UniqueHandle<vk::Buffer, vk::DispatchLoaderDynamic>> mUniformBuffers;
 		std::vector<vk::UniqueHandle<vk::DeviceMemory, vk::DispatchLoaderDynamic>> mUniformBuffersMemory;
 		std::vector<Vertex> mVertices;
-		std::vector<uint32_t> mIndices = { 0, 1, 2, 2, 3, 0 };
+		std::vector<uint32_t> mIndices;
 	};
 
 	static PFN_vkCreateDebugReportCallbackEXT  mPFN_vkCreateDebugReportCallbackEXT;

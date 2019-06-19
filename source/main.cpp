@@ -1,5 +1,5 @@
 #include <iostream>
-#include "Renderer.h"
+#include "RendererC.h"
 
 #if defined(DEBUG) || defined(_DEBUG)
 #define _CRTDBG_MAP_ALLOC
@@ -16,7 +16,7 @@ int main()
 	_CrtSetDbgFlag(_CRTDBG_ALLOC_MEM_DF | _CRTDBG_LEAK_CHECK_DF);
 #endif
 
-	Renderer renderer;
+	RendererC renderer;
 	try
 	{
 		renderer.Run();

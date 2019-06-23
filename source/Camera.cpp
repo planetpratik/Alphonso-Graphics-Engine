@@ -8,25 +8,37 @@ using namespace glm;
 namespace AlphonsoGraphicsEngine
 {
 	const float Camera::DefaultFieldOfView = 45.0f;
-	const float Camera::DefaultNearPlaneDistance = 0.01f;
-	const float Camera::DefaultFarPlaneDistance = 1000.0f;
+	const float Camera::DefaultNearPlaneDistance = 0.1f;
+	const float Camera::DefaultFarPlaneDistance = 10.0f;
 
-	const glm::vec3& Camera::Position() const
+	Camera::Camera(RendererC& renderer):
+		mFieldOfView(DefaultFieldOfView), mAspectRatio(renderer.AspectRatio()), mNearPlaneDistance(DefaultNearPlaneDistance), mFarPlaneDistance(DefaultFarPlaneDistance),
+		mPosition(), mDirection(), mUp(), mRight(), mViewMatrix(), mProjectionMatrix()
+	{
+	}
+
+	Camera::Camera(float fieldOfView, float aspectRatio, float nearPlaneDistance, float farPlaneDistance) :
+		mFieldOfView(fieldOfView), mAspectRatio(aspectRatio), mNearPlaneDistance(nearPlaneDistance), mFarPlaneDistance(farPlaneDistance),
+		mPosition(), mDirection(), mUp(), mRight(), mViewMatrix(), mProjectionMatrix()
+	{
+	}
+
+	const vec3& Camera::Position() const
 	{
 		return mPosition;
 	}
 
-	const glm::vec3& Camera::Direction() const
+	const vec3& Camera::Direction() const
 	{
 		return mDirection;
 	}
 
-	const glm::vec3& Camera::Up() const
+	const vec3& Camera::Up() const
 	{
 		return mUp;
 	}
 
-	const glm::vec3& Camera::Right() const
+	const vec3& Camera::Right() const
 	{
 		return mRight;
 	}
@@ -51,17 +63,17 @@ namespace AlphonsoGraphicsEngine
 		return mFarPlaneDistance;
 	}
 
-	const glm::mat4& Camera::ViewMatrix() const
+	const mat4& Camera::ViewMatrix() const
 	{
 		return mViewMatrix;
 	}
 
-	const glm::mat4& Camera::ProjectionMatrix() const
+	const mat4& Camera::ProjectionMatrix() const
 	{
 		return mProjectionMatrix;
 	}
 
-	glm::mat4 Camera::ViewProjectionMatrix() const
+	mat4 Camera::ViewProjectionMatrix() const
 	{
 		return mViewMatrix * mProjectionMatrix;
 	}
@@ -71,16 +83,21 @@ namespace AlphonsoGraphicsEngine
 		mPosition = vec3(x, y, z);
 	}
 
-	void Camera::SetPosition(const glm::vec3& position)
+	void Camera::SetPosition(const vec3& position)
 	{
 		mPosition = position;
 	}
 
+	void Camera::SetAspectRatio(float aspectRatio)
+	{
+		mAspectRatio = aspectRatio;
+	}
+
 	void Camera::Reset()
 	{
-		mPosition = vec3(0.0f, 0.0f, 0.0f);
-		mDirection = vec3(0.0f, 0.0f, -1.0f);
-		mUp = vec3(0.0f, 1.0f, 0.0f);
+		mPosition = vec3(2.0f, 2.0f, 2.0f);
+		mDirection = vec3(-2.0f, -2.0f, -2.0f);
+		mUp = vec3(0.0f, 0.0f, 1.0f);
 		mRight = vec3(1.0, 0.0f, 0.0f);
 	}
 
@@ -93,19 +110,29 @@ namespace AlphonsoGraphicsEngine
 	void Camera::Update(const GameTime& gameTime)
 	{
 		UNREFERENCED_PARAMETER(gameTime);
-
+		UpdateViewMatrix();
 	}
 
 	void Camera::UpdateViewMatrix()
 	{
+		vec3 target = mPosition + mDirection;
+		mViewMatrix = lookAt(mPosition, target, mUp);
 	}
 
 	void Camera::UpdateProjectionMatrix()
 	{
+		mProjectionMatrix = perspective(mFieldOfView, mAspectRatio, mNearPlaneDistance, mFarPlaneDistance);
 	}
 
-	void Camera::ApplyRotation(const glm::mat4& transform)
+	void Camera::ApplyRotation(const mat4& transform)
 	{
-		UNREFERENCED_PARAMETER(transform);
+		vec4 direction = transform * vec4(mDirection, 0.0f);
+		mDirection = static_cast<vec3>(normalize(direction));
+
+		vec4 up = transform * vec4(mUp, 0.0f);
+		mUp = static_cast<vec3>(normalize(up));
+
+		mRight = cross(mDirection, mUp);
+		mUp = cross(mRight, mDirection);
 	}
 }

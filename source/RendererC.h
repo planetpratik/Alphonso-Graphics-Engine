@@ -15,6 +15,7 @@
 
 namespace AlphonsoGraphicsEngine
 {
+	class FirstPersonCamera;
 	/// <summary>
 	/// RendererC class is the heart of this Rendering Engine & encapsulates main loop.
 	/// </summary>
@@ -55,10 +56,10 @@ namespace AlphonsoGraphicsEngine
 		/// <param name="gameTime">Const reference to passed GameTime.</param>
 		virtual void Update(const GameTime& gameTime);
 
-		/*/// <summary>This method handles all Draw Calls. ( Virtual ).</summary>
-		/// <param name="gameTime">Const reference to passed GameTime.</param>
-		virtual void Draw(const GameTime& gameTime);*/
+		float AspectRatio() const;
+		GLFWwindow* Window();
 
+		RendererC* mRendererInstance;
 
 		struct Vertex
 		{
@@ -107,11 +108,12 @@ namespace AlphonsoGraphicsEngine
 		bool framebufferResized = false;
 
 	protected:
-		virtual void InitializeWindow();
-		virtual void InitializeVulkan();
+		void InitializeWindow();
+		void InitializeVulkan();
 		virtual void Shutdown();
 
-		//void initVulkan();
+		void InitializeCamera();
+
 		void mainLoop();
 		void cleanupSwapChain();
 		void cleanup();
@@ -164,6 +166,7 @@ namespace AlphonsoGraphicsEngine
 		std::vector<const char*> getRequiredExtensions();
 		bool checkValidationLayerSupport();
 
+		std::shared_ptr<AlphonsoGraphicsEngine::FirstPersonCamera> mCamera;
 		GameClock mGameClock;
 		GameTime mGameTime;
 

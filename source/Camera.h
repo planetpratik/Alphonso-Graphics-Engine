@@ -1,13 +1,14 @@
 #pragma once
 #include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 #include "RendererC.h"
 
 namespace AlphonsoGraphicsEngine
 {
-	class Camera : public RendererC
+	class Camera
 	{
 	public:
-		Camera();
+		Camera(RendererC& renderer);
 		Camera(float fieldOfView, float aspectRatio, float nearPlaneDistance, float farPlaneDistance);
 		Camera(const Camera&) = delete;
 		Camera& operator=(const Camera&) = delete;
@@ -31,10 +32,11 @@ namespace AlphonsoGraphicsEngine
 
 		virtual void SetPosition(float x, float y, float z);
 		virtual void SetPosition(const glm::vec3& position);
+		virtual void SetAspectRatio(float aspectRatio);
 
 		virtual void Reset();
-		virtual void Initialize() override;
-		virtual void Update(const GameTime& gameTime) override;
+		virtual void Initialize();
+		virtual void Update(const GameTime& gameTime);
 		virtual void UpdateViewMatrix();
 		virtual void UpdateProjectionMatrix();
 		virtual void ApplyRotation(const glm::mat4& transform);

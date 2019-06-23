@@ -6,7 +6,6 @@
 #include <chrono>
 #include <limits>
 #include <cstring>
-//#include <cstdlib>
 #include <unordered_map>
 
 #define TINYOBJLOADER_IMPLEMENTATION
@@ -21,6 +20,8 @@
 
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
+
+#include "FirstPersonCamera.h"
 
 
 namespace std {
@@ -96,20 +97,24 @@ namespace AlphonsoGraphicsEngine
 
 	void RendererC::Run()
 	{
+		mRendererInstance = this;
 		mainLoop();
 		Shutdown();
 	}
 
 	void RendererC::Initialize()
 	{
-		InitializeWindow();
-		InitializeVulkan();
 		mGameClock.Reset();
+		mGameClock.UpdateGameTime(mGameTime);
+		InitializeWindow();
+		InitializeCamera();
+		InitializeVulkan();
 	}
 
 	void RendererC::Update(const GameTime& gameTime)
 	{
-		gameTime;
+		mGameClock.UpdateGameTime(mGameTime);
+		mCamera->Update(gameTime);
 	}
 
 	void RendererC::InitializeWindow() {
@@ -118,6 +123,7 @@ namespace AlphonsoGraphicsEngine
 		glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 
 		window = glfwCreateWindow(WIDTH, HEIGHT, "Alphonso Engine", nullptr, nullptr);
+
 		glfwSetWindowUserPointer(window, this);
 		glfwSetFramebufferSizeCallback(window, framebufferResizeCallback);
 	}
@@ -155,12 +161,20 @@ namespace AlphonsoGraphicsEngine
 		cleanup();
 	}
 
+	void RendererC::InitializeCamera()
+	{
+		mCamera = std::make_shared<FirstPersonCamera>(*this);
+		mCamera->Initialize();
+		mCamera->Update(mGameTime);
+	}
+
 	void RendererC::mainLoop() 
 	{
 		while (!glfwWindowShouldClose(window)) 
 		{
 			glfwPollEvents();
 			drawFrame();
+			Update(mGameTime);
 		}
 
 		vkDeviceWaitIdle(device);
@@ -257,6 +271,7 @@ namespace AlphonsoGraphicsEngine
 		createGraphicsPipeline();
 		createDepthResources();
 		createFramebuffers();
+		mCamera->SetAspectRatio((float)swapChainExtent.width / swapChainExtent.height);
 		createUniformBuffers();
 		createDescriptorPool();
 		createDescriptorSets();
@@ -1347,15 +1362,11 @@ namespace AlphonsoGraphicsEngine
 
 	void RendererC::updateUniformBuffer(uint32_t currentImage) 
 	{
-		static auto startTime = std::chrono::high_resolution_clock::now();
-
-		auto currentTime = std::chrono::high_resolution_clock::now();
-		float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
-
 		UniformBufferObject ubo = {};
-		ubo.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-		ubo.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-		ubo.proj = glm::perspective(glm::radians(45.0f), swapChainExtent.width / (float)swapChainExtent.height, 0.1f, 10.0f);
+		
+		ubo.model = glm::mat4(1);
+		ubo.view = mCamera->ViewMatrix();
+		ubo.proj = mCamera->ProjectionMatrix();
 		ubo.proj[1][1] *= -1;
 
 		void* data;
@@ -1643,6 +1654,16 @@ namespace AlphonsoGraphicsEngine
 			}
 		}
 		return true;
+	}
+
+	GLFWwindow* RendererC::Window()
+	{
+		return window;
+	}
+
+	float RendererC::AspectRatio() const
+	{
+		return static_cast<float>(WIDTH) / HEIGHT;
 	}
 
 }

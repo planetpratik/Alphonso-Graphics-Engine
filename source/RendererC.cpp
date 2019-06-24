@@ -208,6 +208,8 @@ namespace AlphonsoGraphicsEngine
 		{
 			vkDestroyBuffer(device, uniformBuffers[i], nullptr);
 			vkFreeMemory(device, uniformBuffersMemory[i], nullptr);
+			vkDestroyBuffer(device, fragmentUniformBuffers[i], nullptr);
+			vkFreeMemory(device, fragmentUniformBuffersMemory[i], nullptr);
 		}
 		vkDestroyDescriptorPool(device, descriptorPool, nullptr);
 	}
@@ -575,7 +577,14 @@ namespace AlphonsoGraphicsEngine
 		samplerLayoutBinding.pImmutableSamplers = nullptr;
 		samplerLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 
-		std::array<VkDescriptorSetLayoutBinding, 2> bindings = { uboLayoutBinding, samplerLayoutBinding };
+		VkDescriptorSetLayoutBinding fboLayoutBinding = {};
+		fboLayoutBinding.binding = 2;
+		fboLayoutBinding.descriptorCount = 1;
+		fboLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+		fboLayoutBinding.pImmutableSamplers = nullptr;
+		fboLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+		std::array<VkDescriptorSetLayoutBinding, 3> bindings = { uboLayoutBinding, samplerLayoutBinding, fboLayoutBinding };
 		VkDescriptorSetLayoutCreateInfo layoutInfo = {};
 		layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
 		layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
@@ -1110,23 +1119,29 @@ namespace AlphonsoGraphicsEngine
 	void RendererC::createUniformBuffers() 
 	{
 		VkDeviceSize bufferSize = sizeof(UniformBufferObject);
+		VkDeviceSize fragmentUniformBufferSize = sizeof(FragmentUniformBufferObject);
 
 		uniformBuffers.resize(swapChainImages.size());
 		uniformBuffersMemory.resize(swapChainImages.size());
+		fragmentUniformBuffers.resize(swapChainImages.size());
+		fragmentUniformBuffersMemory.resize(swapChainImages.size());
 
 		for (size_t i = 0; i < swapChainImages.size(); i++) 
 		{
 			createBuffer(bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, uniformBuffers[i], uniformBuffersMemory[i]);
+			createBuffer(fragmentUniformBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, fragmentUniformBuffers[i], fragmentUniformBuffersMemory[i]);
 		}
 	}
 
 	void RendererC::createDescriptorPool()
 	{
-		std::array<VkDescriptorPoolSize, 2> poolSizes = {};
+		std::array<VkDescriptorPoolSize, 3> poolSizes = {};
 		poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
 		poolSizes[0].descriptorCount = static_cast<uint32_t>(swapChainImages.size());
 		poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 		poolSizes[1].descriptorCount = static_cast<uint32_t>(swapChainImages.size());
+		poolSizes[2].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+		poolSizes[2].descriptorCount = static_cast<uint32_t>(swapChainImages.size());
 
 		VkDescriptorPoolCreateInfo poolInfo = {};
 		poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -1167,7 +1182,12 @@ namespace AlphonsoGraphicsEngine
 			imageInfo.imageView = textureImageView;
 			imageInfo.sampler = textureSampler;
 
-			std::array<VkWriteDescriptorSet, 2> descriptorWrites = {};
+			VkDescriptorBufferInfo fragmentUniformBufferInfo = {};
+			fragmentUniformBufferInfo.buffer = fragmentUniformBuffers[i];
+			fragmentUniformBufferInfo.offset = 0;
+			fragmentUniformBufferInfo.range = sizeof(FragmentUniformBufferObject);
+
+			std::array<VkWriteDescriptorSet, 3> descriptorWrites = {};
 
 			descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 			descriptorWrites[0].dstSet = descriptorSets[i];
@@ -1184,6 +1204,14 @@ namespace AlphonsoGraphicsEngine
 			descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 			descriptorWrites[1].descriptorCount = 1;
 			descriptorWrites[1].pImageInfo = &imageInfo;
+
+			descriptorWrites[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+			descriptorWrites[2].dstSet = descriptorSets[i];
+			descriptorWrites[2].dstBinding = 2;
+			descriptorWrites[2].dstArrayElement = 0;
+			descriptorWrites[2].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+			descriptorWrites[2].descriptorCount = 1;
+			descriptorWrites[2].pBufferInfo = &fragmentUniformBufferInfo;
 
 			vkUpdateDescriptorSets(device, static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data(), 0, nullptr);
 		}
@@ -1369,16 +1397,27 @@ namespace AlphonsoGraphicsEngine
 	void RendererC::updateUniformBuffer(uint32_t currentImage) 
 	{
 		UniformBufferObject ubo = {};
+		FragmentUniformBufferObject fbo = {};
 		
 		ubo.model = glm::mat4(1);
 		ubo.view = mCamera->ViewMatrix();
 		ubo.proj = mCamera->ProjectionMatrix();
+		ubo.lightDirection = glm::vec3(-2.0f, -2.0f, -2.0f);
 		ubo.proj[1][1] *= -1;
+
+		fbo.ambientColor = glm::vec4(0.53f, 0.80f, 0.91f, 1.00f);
+		fbo.lightColor = glm::vec4(0.94f, 0.35f, 0.11f, 1.00f);
+
 
 		void* data;
 		vkMapMemory(device, uniformBuffersMemory[currentImage], 0, sizeof(ubo), 0, &data);
 		memcpy(data, &ubo, sizeof(ubo));
 		vkUnmapMemory(device, uniformBuffersMemory[currentImage]);
+
+		void* fragdata;
+		vkMapMemory(device, fragmentUniformBuffersMemory[currentImage], 0, sizeof(fbo), 0, &fragdata);
+		memcpy(fragdata, &fbo, sizeof(fbo));
+		vkUnmapMemory(device, fragmentUniformBuffersMemory[currentImage]);
 	}
 
 	void RendererC::drawFrame() 

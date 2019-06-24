@@ -222,6 +222,13 @@ namespace AlphonsoGraphicsEngine
 			alignas(16) glm::mat4 model;
 			alignas(16) glm::mat4 view;
 			alignas(16) glm::mat4 proj;
+			alignas(16) glm::vec3 lightDirection;
+		};
+
+		struct FragmentUniformBufferObject
+		{
+			alignas(16) glm::vec4 ambientColor;
+			alignas(16) glm::vec4 lightColor;
 		};
 
 	private:
@@ -273,6 +280,8 @@ namespace AlphonsoGraphicsEngine
 
 		std::vector<VkBuffer> uniformBuffers;
 		std::vector<VkDeviceMemory> uniformBuffersMemory;
+		std::vector<VkBuffer> fragmentUniformBuffers;
+		std::vector<VkDeviceMemory> fragmentUniformBuffersMemory;
 
 		VkDescriptorPool descriptorPool;
 		std::vector<VkDescriptorSet> descriptorSets;

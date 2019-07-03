@@ -12,7 +12,8 @@ file(GLOB ENGINE_SOURCE_FILES
 if (MSVC)
 	# remove default warning level from CMAKE_CXX_FLAGS_INIT
     string (REGEX REPLACE "/W[0-4]" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
-    add_compile_options(/W4 /WX)
+    add_compile_options(/W3 /WX)
+	string(REGEX REPLACE "/w44324" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /std:c++17")
 endif()
 

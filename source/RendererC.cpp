@@ -1403,11 +1403,17 @@ namespace AlphonsoGraphicsEngine
 		ubo.view = mCamera->ViewMatrix();
 		ubo.proj = mCamera->ProjectionMatrix();
 		ubo.lightDirection = glm::vec3(-2.0f, -2.0f, -2.0f);
+		ubo.pointLightPosition = glm::vec3(-0.126f, -0.781f, -0.406f);
+		ubo.pointLightRadius = glm::float32(2.0f);
 		ubo.proj[1][1] *= -1;
 
 		fbo.ambientColor = glm::vec4(0.53f, 0.80f, 0.91f, 1.00f);
 		fbo.lightColor = glm::vec4(0.94f, 0.35f, 0.11f, 1.00f);
-
+		fbo.pointLightColor = glm::vec4(1.0f, 0.0f, 0.0f, 0.0f);
+		fbo.cameraPosition = mCamera->Position();
+		fbo.pointLightPosition = glm::vec3(-0.126f, -0.781f, -0.406f);
+		fbo.specularColor = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f);
+		fbo.specularPower = glm::float32(2.0f);
 
 		void* data;
 		vkMapMemory(device, uniformBuffersMemory[currentImage], 0, sizeof(ubo), 0, &data);

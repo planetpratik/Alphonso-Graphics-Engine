@@ -1,7 +1,6 @@
 #pragma once
 #include <vulkan/vulkan.h>
 #include <GLFW/glfw3.h>
-
 #define GLM_FORCE_RADIANS
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
 #define GLM_ENABLE_EXPERIMENTAL
@@ -223,12 +222,19 @@ namespace AlphonsoGraphicsEngine
 			alignas(16) glm::mat4 view;
 			alignas(16) glm::mat4 proj;
 			alignas(16) glm::vec3 lightDirection;
+			alignas(16) glm::vec3 pointLightPosition;
+			alignas(4) glm::float32 pointLightRadius;
 		};
 
 		struct FragmentUniformBufferObject
 		{
 			alignas(16) glm::vec4 ambientColor;
 			alignas(16) glm::vec4 lightColor;
+			alignas(16) glm::vec4 pointLightColor;
+			alignas(16) glm::vec3 pointLightPosition;
+			alignas(16) glm::vec3 cameraPosition;
+			alignas(16) glm::vec4 specularColor;
+			alignas(4) glm::float32 specularPower;
 		};
 
 	private:

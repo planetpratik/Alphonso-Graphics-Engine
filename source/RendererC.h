@@ -57,6 +57,7 @@ namespace AlphonsoGraphicsEngine
 
 		float AspectRatio() const;
 		GLFWwindow* Window();
+		void recreateImGuiWindow();
 
 		RendererC* mRendererInstance;
 
@@ -111,9 +112,11 @@ namespace AlphonsoGraphicsEngine
 		};
 
 		bool framebufferResized = false;
+		bool isImGuiWindowCreated = false;
 
 	protected:
 		void InitializeWindow();
+		void InitializeImgui(float WIDTH, float HEIGHT);
 		void InitializeVulkan();
 		virtual void Shutdown();
 
@@ -170,6 +173,7 @@ namespace AlphonsoGraphicsEngine
 		bool checkDeviceExtensionSupport(VkPhysicalDevice device);
 		std::vector<const char*> getRequiredExtensions();
 		bool checkValidationLayerSupport();
+		void ImGuiSetupWindow();
 
 		std::shared_ptr<AlphonsoGraphicsEngine::FirstPersonCamera> mCamera;
 		GameClock mGameClock;
@@ -262,6 +266,7 @@ namespace AlphonsoGraphicsEngine
 		std::vector<VkFramebuffer> swapChainFramebuffers;
 
 		VkRenderPass renderPass;
+		VkRenderPass uiRenderPass;
 		VkDescriptorSetLayout descriptorSetLayout;
 		VkPipelineLayout pipelineLayout;
 		VkPipeline graphicsPipeline;
@@ -298,5 +303,6 @@ namespace AlphonsoGraphicsEngine
 		std::vector<VkSemaphore> renderFinishedSemaphores;
 		std::vector<VkFence> inFlightFences;
 		size_t currentFrame = 0;
+
 	};
 }

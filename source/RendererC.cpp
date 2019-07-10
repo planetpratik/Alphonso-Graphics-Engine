@@ -8,6 +8,10 @@
 #include <cstring>
 #include <unordered_map>
 
+#include "imgui.h"
+#include "imgui_impl_glfw.h"
+#include "imgui_impl_vulkan.h"
+
 #define TINYOBJLOADER_IMPLEMENTATION
 #include <tiny_obj_loader.h>
 
@@ -66,6 +70,7 @@ namespace AlphonsoGraphicsEngine
 	{
 		height; width;
 		auto app = reinterpret_cast<RendererC*>(glfwGetWindowUserPointer(window));
+		auto io = ImGui::GetIO();
 		app->framebufferResized = true;
 	}
 
@@ -109,6 +114,44 @@ namespace AlphonsoGraphicsEngine
 		InitializeWindow();
 		InitializeCamera();
 		InitializeVulkan();
+		InitializeImgui((float)WIDTH, float(HEIGHT));
+	}
+
+	void RendererC::InitializeImgui(float width, float height)
+	{
+		QueueFamilyIndices Indices = findQueueFamilies(physicalDevice);
+		
+		// Setup Dear ImGui context
+		IMGUI_CHECKVERSION();
+		ImGui::CreateContext();
+		ImGuiIO& io = ImGui::GetIO(); (void)io;
+		io.Fonts->AddFontFromFileTTF("../../Assets/Fonts/Roboto-Medium.ttf", 16.0f);
+		io.DisplaySize = ImVec2(width, height);
+		io.DisplayFramebufferScale = ImVec2(1.0f, 1.0f);
+
+		// Setup Platform/Renderer bindings
+		ImGui_ImplGlfw_InitForVulkan(window, true);
+		ImGui_ImplVulkan_InitInfo init_info = {};
+		init_info.Instance = instance;
+		init_info.PhysicalDevice = physicalDevice;
+		init_info.Device = device;
+		init_info.QueueFamily = Indices.graphicsFamily.value();
+		init_info.Queue = presentQueue;
+		init_info.PipelineCache = VK_NULL_HANDLE;
+		init_info.DescriptorPool = descriptorPool;
+		init_info.Allocator = NULL;
+		init_info.MinImageCount = 2;
+		init_info.ImageCount = static_cast<uint32_t>(swapChainImages.size());
+		init_info.CheckVkResultFn = NULL;
+		ImGui_ImplVulkan_Init(&init_info, renderPass);
+
+		// Setup Dear ImGui style
+		ImGui::StyleColorsDark();
+
+		VkCommandBuffer commandBuffer = beginSingleTimeCommands();
+		ImGui_ImplVulkan_CreateFontsTexture(commandBuffer);
+		endSingleTimeCommands(commandBuffer);
+		ImGui_ImplVulkan_DestroyFontUploadObjects();
 	}
 
 	void RendererC::Update(const GameTime& gameTime)
@@ -117,7 +160,8 @@ namespace AlphonsoGraphicsEngine
 		mCamera->Update(gameTime);
 	}
 
-	void RendererC::InitializeWindow() {
+	void RendererC::InitializeWindow() 
+	{
 		glfwInit();
 
 		glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
@@ -168,16 +212,108 @@ namespace AlphonsoGraphicsEngine
 		mCamera->Update(mGameTime);
 	}
 
-	void RendererC::mainLoop() 
+	void RendererC::recreateImGuiWindow()
 	{
-		while (!glfwWindowShouldClose(window)) 
+		if (!isImGuiWindowCreated)
+		{
+			ImGui_ImplVulkan_Shutdown();
+			ImGui_ImplGlfw_Shutdown();
+			ImGui::DestroyContext();
+			recreateSwapChain();
+			InitializeImgui(float(swapChainExtent.width), float(swapChainExtent.height));
+			ImGuiSetupWindow();
+			isImGuiWindowCreated = true;
+		}
+	}
+
+	void RendererC::ImGuiSetupWindow()
+	{
+		// Start the Dear ImGui frame
+		ImGui_ImplVulkan_NewFrame();
+		ImGui_ImplGlfw_NewFrame();
+
+		auto WindowSize = ImVec2((float)swapChainExtent.width, (float)swapChainExtent.height);
+		ImGui::SetNextWindowSize(WindowSize, ImGuiCond_::ImGuiCond_FirstUseEver);
+		ImGui::SetNextWindowPos(ImVec2(0, 0), ImGuiCond_::ImGuiCond_FirstUseEver);
+		ImGui::NewFrame();
+		
+		// render your GUI
+		ImGui::Begin("Demo window");
+		ImGui::Button("Hello!");
+		ImGui::End();
+		// Render dear imgui UI box into our window
+		ImGui::Render();
+	}
+
+	void RendererC::mainLoop()
+	{
+		while (!glfwWindowShouldClose(window))
 		{
 			glfwPollEvents();
-			drawFrame();
+			if (!isImGuiWindowCreated)
+			{
+				ImGuiSetupWindow();
+				isImGuiWindowCreated = true;
+			}
+
+			for (size_t i = 0; i < commandBuffers.size(); i++)
+			{
+				VkCommandBufferBeginInfo beginInfo = {};
+				beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+				beginInfo.flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT;
+				if (vkBeginCommandBuffer(commandBuffers[i], &beginInfo) != VK_SUCCESS)
+				{
+					throw std::runtime_error("failed to begin recording command buffer!");
+				}
+
+				VkRenderPassBeginInfo renderPassInfo = {};
+				renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+				renderPassInfo.renderPass = renderPass;
+				renderPassInfo.framebuffer = swapChainFramebuffers[i];
+				renderPassInfo.renderArea.offset = { 0, 0 };
+				renderPassInfo.renderArea.extent = swapChainExtent;
+
+				std::array<VkClearValue, 2> clearValues = {};
+				clearValues[0].color = { 0.0f, 0.0f, 0.0f, 1.0f };
+				clearValues[1].depthStencil = { 1.0f, 0 };
+
+				renderPassInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
+				renderPassInfo.pClearValues = clearValues.data();
+				vkCmdBeginRenderPass(commandBuffers[i], &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
+
+				// Bind our Pipeline to draw model
+				vkCmdBindPipeline(commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
+				VkBuffer vertexBuffers[] = { vertexBuffer };
+				VkDeviceSize offsets[] = { 0 };
+				vkCmdBindVertexBuffers(commandBuffers[i], 0, 1, vertexBuffers, offsets);
+				vkCmdBindIndexBuffer(commandBuffers[i], indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+				vkCmdBindDescriptorSets(commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[i], 0, nullptr);
+				vkCmdDrawIndexed(commandBuffers[i], static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
+
+				// Bind Dear Imgui pipeline to draw UI elements inside UI box
+				if (isImGuiWindowCreated)
+				{
+					ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), commandBuffers[i]);
+				}
+
+				vkCmdEndRenderPass(commandBuffers[i]);
+
+				if (vkEndCommandBuffer(commandBuffers[i]) != VK_SUCCESS)
+				{
+					throw std::runtime_error("failed to record command buffer!");
+				}
+				// Draw frame handles updating uniform buffers & presenting frame.
+				drawFrame();
+			}
+			//drawFrame();
+			isImGuiWindowCreated = false;
 			Update(mGameTime);
 		}
 
 		vkDeviceWaitIdle(device);
+		ImGui_ImplVulkan_Shutdown();
+		ImGui_ImplGlfw_Shutdown();
+		ImGui::DestroyContext();
 	}
 
 	void RendererC::cleanupSwapChain()
@@ -214,7 +350,7 @@ namespace AlphonsoGraphicsEngine
 		vkDestroyDescriptorPool(device, descriptorPool, nullptr);
 	}
 
-	void RendererC::cleanup() 
+	void RendererC::cleanup()
 	{
 		cleanupSwapChain();
 
@@ -254,7 +390,7 @@ namespace AlphonsoGraphicsEngine
 		glfwTerminate();
 	}
 
-	void RendererC::recreateSwapChain() 
+	void RendererC::recreateSwapChain()
 	{
 		int width = 0, height = 0;
 		while (width == 0 || height == 0)
@@ -282,7 +418,7 @@ namespace AlphonsoGraphicsEngine
 
 	void RendererC::createInstance()
 	{
-		if (enableValidationLayers && !checkValidationLayerSupport()) 
+		if (enableValidationLayers && !checkValidationLayerSupport())
 		{
 			throw std::runtime_error("validation layers requested, but not available!");
 		}
@@ -304,7 +440,7 @@ namespace AlphonsoGraphicsEngine
 		createInfo.ppEnabledExtensionNames = extensions.data();
 
 		VkDebugUtilsMessengerCreateInfoEXT debugCreateInfo;
-		if (enableValidationLayers) 
+		if (enableValidationLayers)
 		{
 			createInfo.enabledLayerCount = static_cast<uint32_t>(validationLayers.size());
 			createInfo.ppEnabledLayerNames = validationLayers.data();
@@ -312,7 +448,7 @@ namespace AlphonsoGraphicsEngine
 			populateDebugMessengerCreateInfo(debugCreateInfo);
 			createInfo.pNext = (VkDebugUtilsMessengerCreateInfoEXT*)& debugCreateInfo;
 		}
-		else 
+		else
 		{
 			createInfo.enabledLayerCount = 0;
 
@@ -341,26 +477,26 @@ namespace AlphonsoGraphicsEngine
 		VkDebugUtilsMessengerCreateInfoEXT createInfo;
 		populateDebugMessengerCreateInfo(createInfo);
 
-		if (CreateDebugUtilsMessengerEXT(instance, &createInfo, nullptr, &debugMessenger) != VK_SUCCESS) 
+		if (CreateDebugUtilsMessengerEXT(instance, &createInfo, nullptr, &debugMessenger) != VK_SUCCESS)
 		{
 			throw std::runtime_error("failed to set up debug messenger!");
 		}
 	}
 
-	void RendererC::createSurface() 
+	void RendererC::createSurface()
 	{
-		if (glfwCreateWindowSurface(instance, window, nullptr, &surface) != VK_SUCCESS) 
+		if (glfwCreateWindowSurface(instance, window, nullptr, &surface) != VK_SUCCESS)
 		{
 			throw std::runtime_error("failed to create window surface!");
 		}
 	}
 
-	void RendererC::pickPhysicalDevice() 
+	void RendererC::pickPhysicalDevice()
 	{
 		uint32_t deviceCount = 0;
 		vkEnumeratePhysicalDevices(instance, &deviceCount, nullptr);
 
-		if (deviceCount == 0) 
+		if (deviceCount == 0)
 		{
 			throw std::runtime_error("failed to find GPUs with Vulkan support!");
 		}
@@ -377,13 +513,13 @@ namespace AlphonsoGraphicsEngine
 			}
 		}
 
-		if (physicalDevice == VK_NULL_HANDLE) 
+		if (physicalDevice == VK_NULL_HANDLE)
 		{
 			throw std::runtime_error("failed to find a suitable GPU!");
 		}
 	}
 
-	void RendererC::createLogicalDevice() 
+	void RendererC::createLogicalDevice()
 	{
 		QueueFamilyIndices Indices = findQueueFamilies(physicalDevice);
 
@@ -415,7 +551,7 @@ namespace AlphonsoGraphicsEngine
 		createInfo.enabledExtensionCount = static_cast<uint32_t>(deviceExtensions.size());
 		createInfo.ppEnabledExtensionNames = deviceExtensions.data();
 
-		if (enableValidationLayers) 
+		if (enableValidationLayers)
 		{
 			createInfo.enabledLayerCount = static_cast<uint32_t>(validationLayers.size());
 			createInfo.ppEnabledLayerNames = validationLayers.data();
@@ -434,7 +570,7 @@ namespace AlphonsoGraphicsEngine
 		vkGetDeviceQueue(device, Indices.presentFamily.value(), 0, &presentQueue);
 	}
 
-	void RendererC::createSwapChain() 
+	void RendererC::createSwapChain()
 	{
 		SwapChainSupportDetails swapChainSupport = querySwapChainSupport(physicalDevice);
 
@@ -443,7 +579,7 @@ namespace AlphonsoGraphicsEngine
 		VkExtent2D extent = chooseSwapExtent(swapChainSupport.capabilities);
 
 		uint32_t imageCount = swapChainSupport.capabilities.minImageCount + 1;
-		if (swapChainSupport.capabilities.maxImageCount > 0 && imageCount > swapChainSupport.capabilities.maxImageCount) 
+		if (swapChainSupport.capabilities.maxImageCount > 0 && imageCount > swapChainSupport.capabilities.maxImageCount)
 		{
 			imageCount = swapChainSupport.capabilities.maxImageCount;
 		}
@@ -468,7 +604,7 @@ namespace AlphonsoGraphicsEngine
 			createInfo.queueFamilyIndexCount = 2;
 			createInfo.pQueueFamilyIndices = queueFamilyIndices;
 		}
-		else 
+		else
 		{
 			createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
 		}
@@ -478,7 +614,7 @@ namespace AlphonsoGraphicsEngine
 		createInfo.presentMode = presentMode;
 		createInfo.clipped = VK_TRUE;
 
-		if (vkCreateSwapchainKHR(device, &createInfo, nullptr, &swapChain) != VK_SUCCESS) 
+		if (vkCreateSwapchainKHR(device, &createInfo, nullptr, &swapChain) != VK_SUCCESS)
 		{
 			throw std::runtime_error("failed to create swap chain!");
 		}
@@ -501,7 +637,7 @@ namespace AlphonsoGraphicsEngine
 		}
 	}
 
-	void RendererC::createRenderPass() 
+	void RendererC::createRenderPass()
 	{
 		VkAttachmentDescription colorAttachment = {};
 		colorAttachment.format = swapChainImageFormat;
@@ -517,7 +653,7 @@ namespace AlphonsoGraphicsEngine
 		depthAttachment.format = findDepthFormat();
 		depthAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
 		depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-		depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+		depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
 		depthAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
 		depthAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
 		depthAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
@@ -555,7 +691,7 @@ namespace AlphonsoGraphicsEngine
 		renderPassInfo.dependencyCount = 1;
 		renderPassInfo.pDependencies = &dependency;
 
-		if (vkCreateRenderPass(device, &renderPassInfo, nullptr, &renderPass) != VK_SUCCESS) 
+		if (vkCreateRenderPass(device, &renderPassInfo, nullptr, &renderPass) != VK_SUCCESS)
 		{
 			throw std::runtime_error("failed to create render pass!");
 		}
@@ -595,7 +731,7 @@ namespace AlphonsoGraphicsEngine
 		}
 	}
 
-	void RendererC::createGraphicsPipeline() 
+	void RendererC::createGraphicsPipeline()
 	{
 		auto vertShaderCode = readFile("../../Assets/Shaders/vert.spv");
 		auto fragShaderCode = readFile("../../Assets/Shaders/frag.spv");
@@ -671,13 +807,20 @@ namespace AlphonsoGraphicsEngine
 		depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
 		depthStencil.depthTestEnable = VK_TRUE;
 		depthStencil.depthWriteEnable = VK_TRUE;
-		depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
+		depthStencil.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
 		depthStencil.depthBoundsTestEnable = VK_FALSE;
 		depthStencil.stencilTestEnable = VK_FALSE;
 
 		VkPipelineColorBlendAttachmentState colorBlendAttachment = {};
 		colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-		colorBlendAttachment.blendEnable = VK_FALSE;
+		colorBlendAttachment.blendEnable = VK_TRUE;
+
+		colorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+		colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+		colorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD;
+		colorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+		colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+		colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
 
 		VkPipelineColorBlendStateCreateInfo colorBlending = {};
 		colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
@@ -725,11 +868,11 @@ namespace AlphonsoGraphicsEngine
 		vkDestroyShaderModule(device, vertShaderModule, nullptr);
 	}
 
-	void RendererC::createFramebuffers() 
+	void RendererC::createFramebuffers()
 	{
 		swapChainFramebuffers.resize(swapChainImageViews.size());
 
-		for (size_t i = 0; i < swapChainImageViews.size(); i++) 
+		for (size_t i = 0; i < swapChainImageViews.size(); i++)
 		{
 			std::array<VkImageView, 2> attachments = {
 				swapChainImageViews[i],
@@ -765,7 +908,7 @@ namespace AlphonsoGraphicsEngine
 		}
 	}
 
-	void RendererC::createDepthResources() 
+	void RendererC::createDepthResources()
 	{
 		VkFormat depthFormat = findDepthFormat();
 
@@ -794,7 +937,7 @@ namespace AlphonsoGraphicsEngine
 		throw std::runtime_error("failed to find supported format!");
 	}
 
-	VkFormat RendererC::findDepthFormat() 
+	VkFormat RendererC::findDepthFormat()
 	{
 		return findSupportedFormat(
 			{ VK_FORMAT_D32_SFLOAT, VK_FORMAT_D32_SFLOAT_S8_UINT, VK_FORMAT_D24_UNORM_S8_UINT },
@@ -803,12 +946,12 @@ namespace AlphonsoGraphicsEngine
 		);
 	}
 
-	bool RendererC::hasStencilComponent(VkFormat format) 
+	bool RendererC::hasStencilComponent(VkFormat format)
 	{
 		return format == VK_FORMAT_D32_SFLOAT_S8_UINT || format == VK_FORMAT_D24_UNORM_S8_UINT;
 	}
 
-	void RendererC::createTextureImage() 
+	void RendererC::createTextureImage()
 	{
 		int texWidth, texHeight, texChannels;
 		stbi_uc* pixels = stbi_load(TEXTURE_PATH.c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
@@ -862,13 +1005,13 @@ namespace AlphonsoGraphicsEngine
 		samplerInfo.compareOp = VK_COMPARE_OP_ALWAYS;
 		samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
 
-		if (vkCreateSampler(device, &samplerInfo, nullptr, &textureSampler) != VK_SUCCESS) 
+		if (vkCreateSampler(device, &samplerInfo, nullptr, &textureSampler) != VK_SUCCESS)
 		{
 			throw std::runtime_error("failed to create texture sampler!");
 		}
 	}
 
-	VkImageView RendererC::createImageView(VkImage image, VkFormat format, VkImageAspectFlags aspectFlags) 
+	VkImageView RendererC::createImageView(VkImage image, VkFormat format, VkImageAspectFlags aspectFlags)
 	{
 		VkImageViewCreateInfo viewInfo = {};
 		viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
@@ -882,14 +1025,14 @@ namespace AlphonsoGraphicsEngine
 		viewInfo.subresourceRange.layerCount = 1;
 
 		VkImageView imageView;
-		if (vkCreateImageView(device, &viewInfo, nullptr, &imageView) != VK_SUCCESS) 
+		if (vkCreateImageView(device, &viewInfo, nullptr, &imageView) != VK_SUCCESS)
 		{
 			throw std::runtime_error("failed to create texture image view!");
 		}
 		return imageView;
 	}
 
-	void RendererC::createImage(uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage& image, VkDeviceMemory& imageMemory) 
+	void RendererC::createImage(uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage& image, VkDeviceMemory& imageMemory)
 	{
 		VkImageCreateInfo imageInfo = {};
 		imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
@@ -906,7 +1049,7 @@ namespace AlphonsoGraphicsEngine
 		imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
 		imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-		if (vkCreateImage(device, &imageInfo, nullptr, &image) != VK_SUCCESS) 
+		if (vkCreateImage(device, &imageInfo, nullptr, &image) != VK_SUCCESS)
 		{
 			throw std::runtime_error("failed to create image!");
 		}
@@ -919,14 +1062,14 @@ namespace AlphonsoGraphicsEngine
 		allocInfo.allocationSize = memRequirements.size;
 		allocInfo.memoryTypeIndex = findMemoryType(memRequirements.memoryTypeBits, properties);
 
-		if (vkAllocateMemory(device, &allocInfo, nullptr, &imageMemory) != VK_SUCCESS) 
+		if (vkAllocateMemory(device, &allocInfo, nullptr, &imageMemory) != VK_SUCCESS)
 		{
 			throw std::runtime_error("failed to allocate image memory!");
 		}
 		vkBindImageMemory(device, image, imageMemory, 0);
 	}
 
-	void RendererC::transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout) 
+	void RendererC::transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout)
 	{
 		VkCommandBuffer commandBuffer = beginSingleTimeCommands();
 
@@ -942,12 +1085,12 @@ namespace AlphonsoGraphicsEngine
 		{
 			barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
 
-			if (hasStencilComponent(format)) 
+			if (hasStencilComponent(format))
 			{
 				barrier.subresourceRange.aspectMask |= VK_IMAGE_ASPECT_STENCIL_BIT;
 			}
 		}
-		else 
+		else
 		{
 			barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 		}
@@ -968,7 +1111,7 @@ namespace AlphonsoGraphicsEngine
 			sourceStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
 			destinationStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
 		}
-		else if (oldLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL && newLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) 
+		else if (oldLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL && newLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
 		{
 			barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
 			barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
@@ -984,7 +1127,7 @@ namespace AlphonsoGraphicsEngine
 			sourceStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
 			destinationStage = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
 		}
-		else 
+		else
 		{
 			throw std::invalid_argument("unsupported layout transition!");
 		}
@@ -1032,7 +1175,7 @@ namespace AlphonsoGraphicsEngine
 		std::vector<tinyobj::material_t> materials;
 		std::string warn, err;
 
-		if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, MODEL_PATH.c_str())) 
+		if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, MODEL_PATH.c_str()))
 		{
 			throw std::runtime_error(warn + err);
 		}
@@ -1074,7 +1217,7 @@ namespace AlphonsoGraphicsEngine
 		}
 	}
 
-	void RendererC::createVertexBuffer() 
+	void RendererC::createVertexBuffer()
 	{
 		VkDeviceSize bufferSize = static_cast<VkDeviceSize>(sizeof(vertices[0])) * static_cast<VkDeviceSize>(vertices.size());
 
@@ -1095,7 +1238,7 @@ namespace AlphonsoGraphicsEngine
 		vkFreeMemory(device, stagingBufferMemory, nullptr);
 	}
 
-	void RendererC::createIndexBuffer() 
+	void RendererC::createIndexBuffer()
 	{
 		VkDeviceSize bufferSize = static_cast<VkDeviceSize>(sizeof(indices[0])) * static_cast<VkDeviceSize>(indices.size());
 
@@ -1116,7 +1259,7 @@ namespace AlphonsoGraphicsEngine
 		vkFreeMemory(device, stagingBufferMemory, nullptr);
 	}
 
-	void RendererC::createUniformBuffers() 
+	void RendererC::createUniformBuffers()
 	{
 		VkDeviceSize bufferSize = sizeof(UniformBufferObject);
 		VkDeviceSize fragmentUniformBufferSize = sizeof(FragmentUniformBufferObject);
@@ -1126,7 +1269,7 @@ namespace AlphonsoGraphicsEngine
 		fragmentUniformBuffers.resize(swapChainImages.size());
 		fragmentUniformBuffersMemory.resize(swapChainImages.size());
 
-		for (size_t i = 0; i < swapChainImages.size(); i++) 
+		for (size_t i = 0; i < swapChainImages.size(); i++)
 		{
 			createBuffer(bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, uniformBuffers[i], uniformBuffersMemory[i]);
 			createBuffer(fragmentUniformBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, fragmentUniformBuffers[i], fragmentUniformBuffersMemory[i]);
@@ -1135,19 +1278,21 @@ namespace AlphonsoGraphicsEngine
 
 	void RendererC::createDescriptorPool()
 	{
-		std::array<VkDescriptorPoolSize, 3> poolSizes = {};
+		std::array<VkDescriptorPoolSize, 4> poolSizes = {};
 		poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
 		poolSizes[0].descriptorCount = static_cast<uint32_t>(swapChainImages.size());
 		poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 		poolSizes[1].descriptorCount = static_cast<uint32_t>(swapChainImages.size());
 		poolSizes[2].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
 		poolSizes[2].descriptorCount = static_cast<uint32_t>(swapChainImages.size());
+		poolSizes[3].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+		poolSizes[3].descriptorCount = static_cast<uint32_t>(swapChainImages.size());
 
 		VkDescriptorPoolCreateInfo poolInfo = {};
 		poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
 		poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
 		poolInfo.pPoolSizes = poolSizes.data();
-		poolInfo.maxSets = static_cast<uint32_t>(swapChainImages.size());
+		poolInfo.maxSets = static_cast<uint32_t>(swapChainImages.size()) + 1;
 
 		if (vkCreateDescriptorPool(device, &poolInfo, nullptr, &descriptorPool) != VK_SUCCESS)
 		{
@@ -1155,7 +1300,7 @@ namespace AlphonsoGraphicsEngine
 		}
 	}
 
-	void RendererC::createDescriptorSets() 
+	void RendererC::createDescriptorSets()
 	{
 		std::vector<VkDescriptorSetLayout> layouts(swapChainImages.size(), descriptorSetLayout);
 		VkDescriptorSetAllocateInfo allocInfo = {};
@@ -1170,7 +1315,7 @@ namespace AlphonsoGraphicsEngine
 			throw std::runtime_error("failed to allocate descriptor sets!");
 		}
 
-		for (size_t i = 0; i < swapChainImages.size(); i++) 
+		for (size_t i = 0; i < swapChainImages.size(); i++)
 		{
 			VkDescriptorBufferInfo bufferInfo = {};
 			bufferInfo.buffer = uniformBuffers[i];
@@ -1217,7 +1362,7 @@ namespace AlphonsoGraphicsEngine
 		}
 	}
 
-	void RendererC::createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory) 
+	void RendererC::createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory)
 	{
 		VkBufferCreateInfo bufferInfo = {};
 		bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
@@ -1225,7 +1370,7 @@ namespace AlphonsoGraphicsEngine
 		bufferInfo.usage = usage;
 		bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-		if (vkCreateBuffer(device, &bufferInfo, nullptr, &buffer) != VK_SUCCESS) 
+		if (vkCreateBuffer(device, &bufferInfo, nullptr, &buffer) != VK_SUCCESS)
 		{
 			throw std::runtime_error("failed to create buffer!");
 		}
@@ -1246,7 +1391,7 @@ namespace AlphonsoGraphicsEngine
 		vkBindBufferMemory(device, buffer, bufferMemory, 0);
 	}
 
-	VkCommandBuffer RendererC::beginSingleTimeCommands() 
+	VkCommandBuffer RendererC::beginSingleTimeCommands()
 	{
 		VkCommandBufferAllocateInfo allocInfo = {};
 		allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -1266,7 +1411,7 @@ namespace AlphonsoGraphicsEngine
 		return commandBuffer;
 	}
 
-	void RendererC::endSingleTimeCommands(VkCommandBuffer commandBuffer) 
+	void RendererC::endSingleTimeCommands(VkCommandBuffer commandBuffer)
 	{
 		vkEndCommandBuffer(commandBuffer);
 
@@ -1281,7 +1426,7 @@ namespace AlphonsoGraphicsEngine
 		vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
 	}
 
-	void RendererC::copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size) 
+	void RendererC::copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size)
 	{
 		VkCommandBuffer commandBuffer = beginSingleTimeCommands();
 
@@ -1292,7 +1437,7 @@ namespace AlphonsoGraphicsEngine
 		endSingleTimeCommands(commandBuffer);
 	}
 
-	uint32_t RendererC::findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) 
+	uint32_t RendererC::findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties)
 	{
 		VkPhysicalDeviceMemoryProperties memProperties;
 		vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memProperties);
@@ -1317,60 +1462,13 @@ namespace AlphonsoGraphicsEngine
 		allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
 		allocInfo.commandBufferCount = (uint32_t)commandBuffers.size();
 
-		if (vkAllocateCommandBuffers(device, &allocInfo, commandBuffers.data()) != VK_SUCCESS) 
+		if (vkAllocateCommandBuffers(device, &allocInfo, commandBuffers.data()) != VK_SUCCESS)
 		{
 			throw std::runtime_error("failed to allocate command buffers!");
 		}
-
-		for (size_t i = 0; i < commandBuffers.size(); i++) 
-		{
-			VkCommandBufferBeginInfo beginInfo = {};
-			beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-			beginInfo.flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT;
-
-			if (vkBeginCommandBuffer(commandBuffers[i], &beginInfo) != VK_SUCCESS)
-			{
-				throw std::runtime_error("failed to begin recording command buffer!");
-			}
-
-			VkRenderPassBeginInfo renderPassInfo = {};
-			renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-			renderPassInfo.renderPass = renderPass;
-			renderPassInfo.framebuffer = swapChainFramebuffers[i];
-			renderPassInfo.renderArea.offset = { 0, 0 };
-			renderPassInfo.renderArea.extent = swapChainExtent;
-
-			std::array<VkClearValue, 2> clearValues = {};
-			clearValues[0].color = { 0.0f, 0.0f, 0.0f, 1.0f };
-			clearValues[1].depthStencil = { 1.0f, 0 };
-
-			renderPassInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
-			renderPassInfo.pClearValues = clearValues.data();
-
-			vkCmdBeginRenderPass(commandBuffers[i], &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
-
-			vkCmdBindPipeline(commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
-
-			VkBuffer vertexBuffers[] = { vertexBuffer };
-			VkDeviceSize offsets[] = { 0 };
-			vkCmdBindVertexBuffers(commandBuffers[i], 0, 1, vertexBuffers, offsets);
-
-			vkCmdBindIndexBuffer(commandBuffers[i], indexBuffer, 0, VK_INDEX_TYPE_UINT32);
-
-			vkCmdBindDescriptorSets(commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[i], 0, nullptr);
-
-			vkCmdDrawIndexed(commandBuffers[i], static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
-
-			vkCmdEndRenderPass(commandBuffers[i]);
-
-			if (vkEndCommandBuffer(commandBuffers[i]) != VK_SUCCESS) 
-			{
-				throw std::runtime_error("failed to record command buffer!");
-			}
-		}
 	}
 
-	void RendererC::createSyncObjects() 
+	void RendererC::createSyncObjects()
 	{
 		imageAvailableSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
 		renderFinishedSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
@@ -1383,7 +1481,7 @@ namespace AlphonsoGraphicsEngine
 		fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
 		fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
 
-		for (size_t i = 0; i < static_cast<size_t>(MAX_FRAMES_IN_FLIGHT); i++) 
+		for (size_t i = 0; i < static_cast<size_t>(MAX_FRAMES_IN_FLIGHT); i++)
 		{
 			if (vkCreateSemaphore(device, &semaphoreInfo, nullptr, &imageAvailableSemaphores[i]) != VK_SUCCESS ||
 				vkCreateSemaphore(device, &semaphoreInfo, nullptr, &renderFinishedSemaphores[i]) != VK_SUCCESS ||
@@ -1394,11 +1492,11 @@ namespace AlphonsoGraphicsEngine
 		}
 	}
 
-	void RendererC::updateUniformBuffer(uint32_t currentImage) 
+	void RendererC::updateUniformBuffer(uint32_t currentImage)
 	{
 		UniformBufferObject ubo = {};
 		FragmentUniformBufferObject fbo = {};
-		
+
 		ubo.model = glm::mat4(1);
 		ubo.view = mCamera->ViewMatrix();
 		ubo.proj = mCamera->ProjectionMatrix();
@@ -1426,14 +1524,14 @@ namespace AlphonsoGraphicsEngine
 		vkUnmapMemory(device, fragmentUniformBuffersMemory[currentImage]);
 	}
 
-	void RendererC::drawFrame() 
+	void RendererC::drawFrame()
 	{
 		vkWaitForFences(device, 1, &inFlightFences[currentFrame], VK_TRUE, std::numeric_limits<uint64_t>::max());
 
 		uint32_t imageIndex;
 		VkResult result = vkAcquireNextImageKHR(device, swapChain, std::numeric_limits<uint64_t>::max(), imageAvailableSemaphores[currentFrame], VK_NULL_HANDLE, &imageIndex);
 
-		if (result == VK_ERROR_OUT_OF_DATE_KHR) 
+		if (result == VK_ERROR_OUT_OF_DATE_KHR)
 		{
 			recreateSwapChain();
 			return;
@@ -1463,7 +1561,7 @@ namespace AlphonsoGraphicsEngine
 
 		vkResetFences(device, 1, &inFlightFences[currentFrame]);
 
-		if (vkQueueSubmit(graphicsQueue, 1, &submitInfo, inFlightFences[currentFrame]) != VK_SUCCESS) 
+		if (vkQueueSubmit(graphicsQueue, 1, &submitInfo, inFlightFences[currentFrame]) != VK_SUCCESS)
 		{
 			throw std::runtime_error("failed to submit draw command buffer!");
 		}
@@ -1487,7 +1585,7 @@ namespace AlphonsoGraphicsEngine
 			framebufferResized = false;
 			recreateSwapChain();
 		}
-		else if (result != VK_SUCCESS) 
+		else if (result != VK_SUCCESS)
 		{
 			throw std::runtime_error("failed to present swap chain image!");
 		}
@@ -1495,7 +1593,7 @@ namespace AlphonsoGraphicsEngine
 		currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
 	}
 
-	VkShaderModule RendererC::createShaderModule(const std::vector<char>& code) 
+	VkShaderModule RendererC::createShaderModule(const std::vector<char>& code)
 	{
 		VkShaderModuleCreateInfo createInfo = {};
 		createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
@@ -1510,9 +1608,9 @@ namespace AlphonsoGraphicsEngine
 		return shaderModule;
 	}
 
-	VkSurfaceFormatKHR RendererC::chooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats) 
+	VkSurfaceFormatKHR RendererC::chooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats)
 	{
-		for (const auto& availableFormat : availableFormats) 
+		for (const auto& availableFormat : availableFormats)
 		{
 			if (availableFormat.format == VK_FORMAT_B8G8R8A8_UNORM && availableFormat.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
 			{
@@ -1522,17 +1620,17 @@ namespace AlphonsoGraphicsEngine
 		return availableFormats[0];
 	}
 
-	VkPresentModeKHR RendererC::chooseSwapPresentMode(const std::vector<VkPresentModeKHR>& availablePresentModes) 
+	VkPresentModeKHR RendererC::chooseSwapPresentMode(const std::vector<VkPresentModeKHR>& availablePresentModes)
 	{
 		VkPresentModeKHR bestMode = VK_PRESENT_MODE_FIFO_KHR;
 
-		for (const auto& availablePresentMode : availablePresentModes) 
+		for (const auto& availablePresentMode : availablePresentModes)
 		{
-			if (availablePresentMode == VK_PRESENT_MODE_MAILBOX_KHR) 
+			if (availablePresentMode == VK_PRESENT_MODE_MAILBOX_KHR)
 			{
 				return availablePresentMode;
 			}
-			else if (availablePresentMode == VK_PRESENT_MODE_IMMEDIATE_KHR) 
+			else if (availablePresentMode == VK_PRESENT_MODE_IMMEDIATE_KHR)
 			{
 				bestMode = availablePresentMode;
 			}
@@ -1572,7 +1670,7 @@ namespace AlphonsoGraphicsEngine
 		uint32_t formatCount;
 		vkGetPhysicalDeviceSurfaceFormatsKHR(Device, surface, &formatCount, nullptr);
 
-		if (formatCount != 0) 
+		if (formatCount != 0)
 		{
 			details.formats.resize(formatCount);
 			vkGetPhysicalDeviceSurfaceFormatsKHR(Device, surface, &formatCount, details.formats.data());
@@ -1581,7 +1679,7 @@ namespace AlphonsoGraphicsEngine
 		uint32_t presentModeCount;
 		vkGetPhysicalDeviceSurfacePresentModesKHR(Device, surface, &presentModeCount, nullptr);
 
-		if (presentModeCount != 0) 
+		if (presentModeCount != 0)
 		{
 			details.presentModes.resize(presentModeCount);
 			vkGetPhysicalDeviceSurfacePresentModesKHR(Device, surface, &presentModeCount, details.presentModes.data());
@@ -1608,7 +1706,7 @@ namespace AlphonsoGraphicsEngine
 		return Indices.isComplete() && extensionsSupported && swapChainAdequate && supportedFeatures.samplerAnisotropy;
 	}
 
-	bool RendererC::checkDeviceExtensionSupport(VkPhysicalDevice Device) 
+	bool RendererC::checkDeviceExtensionSupport(VkPhysicalDevice Device)
 	{
 		uint32_t extensionCount;
 		vkEnumerateDeviceExtensionProperties(Device, nullptr, &extensionCount, nullptr);
@@ -1618,7 +1716,7 @@ namespace AlphonsoGraphicsEngine
 
 		std::set<std::string> requiredExtensions(deviceExtensions.begin(), deviceExtensions.end());
 
-		for (const auto& extension : availableExtensions) 
+		for (const auto& extension : availableExtensions)
 		{
 			requiredExtensions.erase(extension.extensionName);
 		}
@@ -1626,7 +1724,7 @@ namespace AlphonsoGraphicsEngine
 		return requiredExtensions.empty();
 	}
 
-	RendererC::QueueFamilyIndices RendererC::findQueueFamilies(VkPhysicalDevice Device) 
+	RendererC::QueueFamilyIndices RendererC::findQueueFamilies(VkPhysicalDevice Device)
 	{
 		QueueFamilyIndices queueIndices;
 
@@ -1637,9 +1735,9 @@ namespace AlphonsoGraphicsEngine
 		vkGetPhysicalDeviceQueueFamilyProperties(Device, &queueFamilyCount, queueFamilies.data());
 
 		int i = 0;
-		for (const auto& queueFamily : queueFamilies) 
+		for (const auto& queueFamily : queueFamilies)
 		{
-			if (queueFamily.queueCount > 0 && queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT) 
+			if (queueFamily.queueCount > 0 && queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT)
 			{
 				queueIndices.graphicsFamily = i;
 			}
@@ -1647,7 +1745,7 @@ namespace AlphonsoGraphicsEngine
 			VkBool32 presentSupport = false;
 			vkGetPhysicalDeviceSurfaceSupportKHR(Device, i, surface, &presentSupport);
 
-			if (queueFamily.queueCount > 0 && presentSupport) 
+			if (queueFamily.queueCount > 0 && presentSupport)
 			{
 				queueIndices.presentFamily = i;
 			}
@@ -1671,14 +1769,14 @@ namespace AlphonsoGraphicsEngine
 
 		std::vector<const char*> extensions(glfwExtensions, glfwExtensions + glfwExtensionCount);
 
-		if (enableValidationLayers) 
+		if (enableValidationLayers)
 		{
 			extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
 		}
 		return extensions;
 	}
 
-	bool RendererC::checkValidationLayerSupport() 
+	bool RendererC::checkValidationLayerSupport()
 	{
 		uint32_t layerCount;
 		vkEnumerateInstanceLayerProperties(&layerCount, nullptr);
@@ -1686,13 +1784,13 @@ namespace AlphonsoGraphicsEngine
 		std::vector<VkLayerProperties> availableLayers(layerCount);
 		vkEnumerateInstanceLayerProperties(&layerCount, availableLayers.data());
 
-		for (const char* layerName : validationLayers) 
+		for (const char* layerName : validationLayers)
 		{
 			bool layerFound = false;
 
-			for (const auto& layerProperties : availableLayers) 
+			for (const auto& layerProperties : availableLayers)
 			{
-				if (strcmp(layerName, layerProperties.layerName) == 0) 
+				if (strcmp(layerName, layerProperties.layerName) == 0)
 				{
 					layerFound = true;
 					break;

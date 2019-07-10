@@ -183,7 +183,7 @@ namespace AlphonsoGraphicsEngine
 		const int HEIGHT = 600;
 
 		const std::string MODEL_PATH = "../../Assets/Models/ChaletN.objs";
-		const std::string TEXTURE_PATH = "../../Assets/Textures/chalet.jpg";
+		const std::string TEXTURE_PATH = "../../Assets/Textures/chalet.png";
 
 		const int MAX_FRAMES_IN_FLIGHT = 2;
 

@@ -15,6 +15,7 @@
 namespace AlphonsoGraphicsEngine
 {
 	class FirstPersonCamera;
+	class Projector;
 	/// <summary>
 	/// RendererC class is the heart of this Rendering Engine & encapsulates main loop.
 	/// </summary>
@@ -121,6 +122,7 @@ namespace AlphonsoGraphicsEngine
 		virtual void Shutdown();
 
 		void InitializeCamera();
+		void InitializeProjector();
 
 		void mainLoop();
 		void cleanupSwapChain();
@@ -176,14 +178,17 @@ namespace AlphonsoGraphicsEngine
 		void ImGuiSetupWindow();
 
 		std::shared_ptr<AlphonsoGraphicsEngine::FirstPersonCamera> mCamera;
+		std::shared_ptr<AlphonsoGraphicsEngine::Projector> mProjector;
+
 		GameClock mGameClock;
 		GameTime mGameTime;
 
-		const int WIDTH = 800;
-		const int HEIGHT = 600;
+		const int WIDTH = 1024;
+		const int HEIGHT = 768;
 
 		const std::string MODEL_PATH = "../../Assets/Models/ChaletN.objs";
 		const std::string TEXTURE_PATH = "../../Assets/Textures/chalet.png";
+		const std::string PROJECTED_TEXTURE_PATH = "../../Assets/Textures/ProjectedTexture.png";
 
 		const int MAX_FRAMES_IN_FLIGHT = 2;
 
@@ -228,6 +233,7 @@ namespace AlphonsoGraphicsEngine
 			alignas(16) glm::vec3 lightDirection;
 			alignas(16) glm::vec3 pointLightPosition;
 			alignas(4) glm::float32 pointLightRadius;
+			alignas(16) glm::mat4 projectiveTextureMatrix;
 		};
 
 		struct FragmentUniformBufferObject
@@ -245,6 +251,7 @@ namespace AlphonsoGraphicsEngine
 
 		SwapChainSupportDetails querySwapChainSupport(VkPhysicalDevice device);
 		QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device);
+		void RendererC::InitializeProjectedTextureScalingMatrix(uint32_t textureWidth, uint32_t textureHeight);
 
 		GLFWwindow* window;
 
@@ -282,6 +289,11 @@ namespace AlphonsoGraphicsEngine
 		VkImageView textureImageView;
 		VkSampler textureSampler;
 
+		VkImage projectedTextureImage;
+		VkDeviceMemory projectedTextureImageMemory;
+		VkImageView projectedTextureImageView;
+		VkSampler projectedTextureSampler;
+
 		std::vector<Vertex> vertices;
 		std::vector<uint32_t> indices;
 		VkBuffer vertexBuffer;
@@ -304,5 +316,10 @@ namespace AlphonsoGraphicsEngine
 		std::vector<VkFence> inFlightFences;
 		size_t currentFrame = 0;
 
+		glm::mat4 mProjectedTextureScalingMatrix;
+		uint32_t mProjectedTextureWidth = 0;
+		uint32_t mProjectedTextureHeight = 0;
+		float mProjectorPosition[3] = {};
+		float mProjectorDirection[3] = {};
 	};
 }

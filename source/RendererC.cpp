@@ -26,6 +26,7 @@
 #include <stb_image.h>
 
 #include "FirstPersonCamera.h"
+#include "Projector.h"
 
 
 namespace std {
@@ -114,6 +115,7 @@ namespace AlphonsoGraphicsEngine
 		InitializeWindow();
 		InitializeCamera();
 		InitializeVulkan();
+		InitializeProjector();
 		InitializeImgui((float)WIDTH, float(HEIGHT));
 	}
 
@@ -158,6 +160,7 @@ namespace AlphonsoGraphicsEngine
 	{
 		mGameClock.UpdateGameTime(mGameTime);
 		mCamera->Update(gameTime);
+		mProjector->Update(gameTime);
 	}
 
 	void RendererC::InitializeWindow() 
@@ -212,6 +215,14 @@ namespace AlphonsoGraphicsEngine
 		mCamera->Update(mGameTime);
 	}
 
+	void RendererC::InitializeProjector()
+	{
+		mProjector = std::make_shared<Projector>(*this);
+		mProjector->SetAspectRatio((float)swapChainExtent.width / swapChainExtent.height);
+		mProjector->Initialize();
+		mProjector->Update(mGameTime);
+	}
+
 	void RendererC::recreateImGuiWindow()
 	{
 		if (!isImGuiWindowCreated)
@@ -238,8 +249,30 @@ namespace AlphonsoGraphicsEngine
 		ImGui::NewFrame();
 		
 		// render your GUI
-		ImGui::Begin("Demo window");
-		ImGui::Button("Hello!");
+		ImGui::Begin("Alphonso Engine");
+		ImGui::Text("Camera Position: (%f, %f, %f) ", mCamera->Position().x, mCamera->Position().y, mCamera->Position().z);
+		ImGui::Text("Camera Direction: (%f, %f, %f) ", mCamera->Direction().x, mCamera->Direction().y, mCamera->Direction().z);
+		ImGui::Text("Projector Position: (%f, %f, %f) ", mProjector->Position().x, mProjector->Position().y, mProjector->Position().z);
+		ImGui::Text("Projector Direction: (%f, %f, %f) ", mProjector->Direction().x, mProjector->Direction().y, mProjector->Direction().z);
+		
+		ImGui::InputFloat3("Projector Position", mProjectorPosition, 4);
+		if (ImGui::SliderFloat3("Projector Position", mProjectorPosition, -10.0f, 10.0f))
+		{
+			mProjector->SetPosition(glm::vec3(mProjectorPosition[0], mProjectorPosition[1], mProjectorPosition[2]));
+		}
+		/*if(ImGui::Button("Set Postion"))
+		{
+			mProjector->SetPosition(glm::vec3(mProjectorPosition[0], mProjectorPosition[1], mProjectorPosition[2]));
+		}*/
+		ImGui::InputFloat3("Projector Direction", mProjectorDirection, 4);
+		if (ImGui::SliderFloat3("Projector Direction", mProjectorDirection, -100.0f, 100.0f))
+		{
+			mProjector->SetDirection(mProjectorDirection[0], mProjectorDirection[1], mProjectorDirection[2]);
+		}
+		/*if (ImGui::Button("Set Direction"))
+		{
+			mProjector->SetDirection(mProjectorDirection[0], mProjectorDirection[1], mProjectorDirection[2]);
+		} */
 		ImGui::End();
 		// Render dear imgui UI box into our window
 		ImGui::Render();
@@ -359,6 +392,12 @@ namespace AlphonsoGraphicsEngine
 
 		vkDestroyImage(device, textureImage, nullptr);
 		vkFreeMemory(device, textureImageMemory, nullptr);
+
+		vkDestroySampler(device, projectedTextureSampler, nullptr);
+		vkDestroyImageView(device, projectedTextureImageView, nullptr);
+
+		vkDestroyImage(device, projectedTextureImage, nullptr);
+		vkFreeMemory(device, projectedTextureImageMemory, nullptr);
 
 		vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
 
@@ -720,7 +759,14 @@ namespace AlphonsoGraphicsEngine
 		fboLayoutBinding.pImmutableSamplers = nullptr;
 		fboLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 
-		std::array<VkDescriptorSetLayoutBinding, 3> bindings = { uboLayoutBinding, samplerLayoutBinding, fboLayoutBinding };
+		VkDescriptorSetLayoutBinding projectedTextureSamplerLayoutBinding = {};
+		projectedTextureSamplerLayoutBinding.binding = 3;
+		projectedTextureSamplerLayoutBinding.descriptorCount = 1;
+		projectedTextureSamplerLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+		projectedTextureSamplerLayoutBinding.pImmutableSamplers = nullptr;
+		projectedTextureSamplerLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+		std::array<VkDescriptorSetLayoutBinding, 4> bindings = { uboLayoutBinding, samplerLayoutBinding, fboLayoutBinding, projectedTextureSamplerLayoutBinding };
 		VkDescriptorSetLayoutCreateInfo layoutInfo = {};
 		layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
 		layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
@@ -953,13 +999,14 @@ namespace AlphonsoGraphicsEngine
 
 	void RendererC::createTextureImage()
 	{
+		// Load Model Texture Image
 		int texWidth, texHeight, texChannels;
 		stbi_uc* pixels = stbi_load(TEXTURE_PATH.c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
 		VkDeviceSize imageSize = static_cast<uint64_t>(texWidth) * static_cast<uint64_t>(texHeight) * 4U;
 
 		if (!pixels)
 		{
-			throw std::runtime_error("failed to load texture image!");
+			throw std::runtime_error("failed to load model texture image!");
 		}
 
 		VkBuffer stagingBuffer;
@@ -981,15 +1028,49 @@ namespace AlphonsoGraphicsEngine
 
 		vkDestroyBuffer(device, stagingBuffer, nullptr);
 		vkFreeMemory(device, stagingBufferMemory, nullptr);
+
+		// Load Projected Texture Image
+
+		texWidth = 0, texHeight = 0, texChannels = 0, pixels = nullptr, data = nullptr;
+		pixels = stbi_load(PROJECTED_TEXTURE_PATH.c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
+		imageSize = static_cast<uint64_t>(texWidth) * static_cast<uint64_t>(texHeight) * 4U;
+
+		if (!pixels)
+		{
+			throw std::runtime_error("failed to load projected texture image!");
+		}
+		mProjectedTextureWidth = static_cast<uint32_t>(texWidth);
+		mProjectedTextureHeight = static_cast<uint32_t>(texHeight);
+		createBuffer(imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
+
+		vkMapMemory(device, stagingBufferMemory, 0, imageSize, 0, &data);
+		memcpy(data, pixels, static_cast<size_t>(imageSize));
+		vkUnmapMemory(device, stagingBufferMemory);
+
+		stbi_image_free(pixels);
+
+		createImage(texWidth, texHeight, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, projectedTextureImage, projectedTextureImageMemory);
+
+		transitionImageLayout(projectedTextureImage, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+		copyBufferToImage(stagingBuffer, projectedTextureImage, static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight));
+		transitionImageLayout(projectedTextureImage, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
+		vkDestroyBuffer(device, stagingBuffer, nullptr);
+		vkFreeMemory(device, stagingBufferMemory, nullptr);
+
+		// Initialize Projected Texture Scaling Matrix
+		InitializeProjectedTextureScalingMatrix(mProjectedTextureWidth, mProjectedTextureHeight);
 	}
 
 	void RendererC::createTextureImageView()
 	{
 		textureImageView = createImageView(textureImage, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT);
+		projectedTextureImageView = createImageView(projectedTextureImage, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT);
 	}
 
 	void RendererC::createTextureSampler()
 	{
+		// Create Sampler for Model Texture
 		VkSamplerCreateInfo samplerInfo = {};
 		samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
 		samplerInfo.magFilter = VK_FILTER_LINEAR;
@@ -1007,7 +1088,31 @@ namespace AlphonsoGraphicsEngine
 
 		if (vkCreateSampler(device, &samplerInfo, nullptr, &textureSampler) != VK_SUCCESS)
 		{
-			throw std::runtime_error("failed to create texture sampler!");
+			throw std::runtime_error("failed to create model texture sampler!");
+		}
+
+		// Create Sampler for Projected Texture Mapping
+		samplerInfo = {};
+		samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+		samplerInfo.magFilter = VK_FILTER_LINEAR;
+		samplerInfo.minFilter = VK_FILTER_LINEAR;
+		/*samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+		samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+		samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;*/
+		samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+		samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+		samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+		samplerInfo.anisotropyEnable = VK_TRUE;
+		samplerInfo.maxAnisotropy = 16;
+		samplerInfo.borderColor = VK_BORDER_COLOR_INT_OPAQUE_WHITE;
+		samplerInfo.unnormalizedCoordinates = VK_FALSE;
+		samplerInfo.compareEnable = VK_FALSE;
+		samplerInfo.compareOp = VK_COMPARE_OP_ALWAYS;
+		samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+
+		if (vkCreateSampler(device, &samplerInfo, nullptr, &projectedTextureSampler) != VK_SUCCESS)
+		{
+			throw std::runtime_error("failed to create projected texture sampler!");
 		}
 	}
 
@@ -1278,7 +1383,7 @@ namespace AlphonsoGraphicsEngine
 
 	void RendererC::createDescriptorPool()
 	{
-		std::array<VkDescriptorPoolSize, 4> poolSizes = {};
+		std::array<VkDescriptorPoolSize, 5> poolSizes = {};
 		poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
 		poolSizes[0].descriptorCount = static_cast<uint32_t>(swapChainImages.size());
 		poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -1287,12 +1392,14 @@ namespace AlphonsoGraphicsEngine
 		poolSizes[2].descriptorCount = static_cast<uint32_t>(swapChainImages.size());
 		poolSizes[3].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 		poolSizes[3].descriptorCount = static_cast<uint32_t>(swapChainImages.size());
+		poolSizes[4].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+		poolSizes[4].descriptorCount = static_cast<uint32_t>(swapChainImages.size());
 
 		VkDescriptorPoolCreateInfo poolInfo = {};
 		poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
 		poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
 		poolInfo.pPoolSizes = poolSizes.data();
-		poolInfo.maxSets = static_cast<uint32_t>(swapChainImages.size()) + 1;
+		poolInfo.maxSets = static_cast<uint32_t>(swapChainImages.size()) + 2;
 
 		if (vkCreateDescriptorPool(device, &poolInfo, nullptr, &descriptorPool) != VK_SUCCESS)
 		{
@@ -1332,7 +1439,12 @@ namespace AlphonsoGraphicsEngine
 			fragmentUniformBufferInfo.offset = 0;
 			fragmentUniformBufferInfo.range = sizeof(FragmentUniformBufferObject);
 
-			std::array<VkWriteDescriptorSet, 3> descriptorWrites = {};
+			VkDescriptorImageInfo projectedTextureImageInfo = {};
+			projectedTextureImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+			projectedTextureImageInfo.imageView = projectedTextureImageView;
+			projectedTextureImageInfo.sampler = projectedTextureSampler;
+
+			std::array<VkWriteDescriptorSet, 4> descriptorWrites = {};
 
 			descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 			descriptorWrites[0].dstSet = descriptorSets[i];
@@ -1357,6 +1469,14 @@ namespace AlphonsoGraphicsEngine
 			descriptorWrites[2].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
 			descriptorWrites[2].descriptorCount = 1;
 			descriptorWrites[2].pBufferInfo = &fragmentUniformBufferInfo;
+
+			descriptorWrites[3].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+			descriptorWrites[3].dstSet = descriptorSets[i];
+			descriptorWrites[3].dstBinding = 3;
+			descriptorWrites[3].dstArrayElement = 0;
+			descriptorWrites[3].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+			descriptorWrites[3].descriptorCount = 1;
+			descriptorWrites[3].pImageInfo = &projectedTextureImageInfo;
 
 			vkUpdateDescriptorSets(device, static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data(), 0, nullptr);
 		}
@@ -1503,16 +1623,17 @@ namespace AlphonsoGraphicsEngine
 		ubo.lightDirection = glm::vec3(-2.0f, -2.0f, -2.0f);
 		ubo.pointLightPosition = glm::vec3(0.0569f, -1.078f, 0.4015f);
 		ubo.pointLightRadius = glm::float32(2.0f);
+		ubo.projectiveTextureMatrix = mProjector->ViewProjectionMatrix() * mProjectedTextureScalingMatrix * glm::mat4(1);
+
 		ubo.proj[1][1] *= -1;
 
 		fbo.ambientColor = glm::vec4(0.53f, 0.80f, 0.91f, 1.00f);
 		fbo.lightColor = glm::vec4(0.94f, 0.35f, 0.11f, 1.00f);
 		fbo.pointLightColor = glm::vec4(1.0f, 0.0f, 0.0f, 0.0f);
 		fbo.cameraPosition = mCamera->Position();
-		//fbo.pointLightPosition = glm::vec3(-0.126f, -0.781f, -0.406f);
 		fbo.pointLightPosition = glm::vec3(0.0569f, -1.078f, 0.4015f);
 		fbo.specularColor = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f);
-		fbo.specularPower = glm::float32(50.0f);
+		fbo.specularPower = glm::float32(10.0f);
 
 		void* data;
 		vkMapMemory(device, uniformBuffersMemory[currentImage], 0, sizeof(ubo), 0, &data);
@@ -1814,6 +1935,21 @@ namespace AlphonsoGraphicsEngine
 	float RendererC::AspectRatio() const
 	{
 		return static_cast<float>(WIDTH) / HEIGHT;
+	}
+
+	void RendererC::InitializeProjectedTextureScalingMatrix(uint32_t textureWidth, uint32_t textureHeight)
+	{
+		mProjectedTextureScalingMatrix = {};
+
+		float scalingBiasX = 0.5f + (0.5f / textureWidth);
+		float scalingBiasY = 0.5f + (0.5f / textureHeight);
+
+		mProjectedTextureScalingMatrix[0][0] = 0.5f;
+		mProjectedTextureScalingMatrix[1][1] = -0.5f;
+		mProjectedTextureScalingMatrix[2][2] = 1.0f;
+		mProjectedTextureScalingMatrix[3][0] = scalingBiasX;
+		mProjectedTextureScalingMatrix[3][1] = scalingBiasY;
+		mProjectedTextureScalingMatrix[3][3] = 1.0f;
 	}
 
 }

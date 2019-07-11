@@ -8,6 +8,7 @@ layout(binding = 0) uniform UniformBufferObject {
 	vec3 lightDirection;
 	vec3 pointLightPosition;
 	float pointLightRadius;
+	mat4 projectiveTextureMatrix;
 } ubo;
 
 layout(location = 0) in vec3 inPosition;
@@ -21,6 +22,7 @@ layout(location = 2) out vec3 fragNormal;
 layout(location = 3) out vec3 fragLightDirection;
 layout(location = 4) out vec3 fragWorldPosition;
 layout(location = 5) out float fragPointLightAttenuation;
+layout(location = 6) out vec4 fragProjectedTextureCoordinate;
 
 void main() 
 {
@@ -33,4 +35,6 @@ void main()
 
 	vec3 pointLightDirection = ubo.pointLightPosition - fragWorldPosition;
 	fragPointLightAttenuation = clamp(1.0f - (length(pointLightDirection) / ubo.pointLightRadius), 0.0f, 1.0f);
+
+	fragProjectedTextureCoordinate = (vec4(inPosition, 1.0f) * ubo.projectiveTextureMatrix).xyzw;
 }

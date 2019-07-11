@@ -13,12 +13,15 @@ layout(binding = 2) uniform FragmentUniformBufferObject
 	float specularPower;
 }fbo;
 
+layout(binding = 3) uniform sampler2D projectedTexSampler;
+
 layout(location = 0) in vec3 fragColor;
 layout(location = 1) in vec2 fragTexCoord;
 layout(location = 2) in vec3 fragNormal;
 layout(location = 3) in vec3 fragLightDirection;
 layout(location = 4) in vec3 fragWorldPosition;
 layout(location = 5) in float fragPointLightAttenuation;
+layout(location = 6) in vec4 fragProjectedTextureCoordinate;
 
 layout(location = 0) out vec4 outColor;
 
@@ -45,4 +48,11 @@ void main()
 
 	outColor.rgb = ambient + diffuse + diffusePointLight + specular;
 	outColor.a = sampledColor.a;
+
+	if(fragProjectedTextureCoordinate.w <= 0.0f)
+	{
+		vec2 projectedTextureCoordinate = fragProjectedTextureCoordinate.xy / fragProjectedTextureCoordinate.w;
+		vec3 sampledProjectedTexColor = texture(projectedTexSampler, projectedTextureCoordinate.xy).rgb;
+		outColor.rgb *= sampledProjectedTexColor;
+	}
 }

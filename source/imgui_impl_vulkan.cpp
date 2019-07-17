@@ -98,7 +98,8 @@ void ImGui_ImplVulkanH_DestroyFrameRenderBuffers(VkDevice device, ImGui_ImplVulk
 void ImGui_ImplVulkanH_DestroyWindowRenderBuffers(VkDevice device, ImGui_ImplVulkanH_WindowRenderBuffers* buffers, const VkAllocationCallbacks* allocator);
 void ImGui_ImplVulkanH_CreateWindowSwapChain(VkPhysicalDevice physical_device, VkDevice device, ImGui_ImplVulkanH_Window* wd, const VkAllocationCallbacks* allocator, int w, int h, uint32_t min_image_count);
 void ImGui_ImplVulkanH_CreateWindowCommandBuffers(VkPhysicalDevice physical_device, VkDevice device, ImGui_ImplVulkanH_Window* wd, uint32_t queue_family, const VkAllocationCallbacks* allocator);
-
+VkSampleCountFlagBits getMaximumPossibleSamples();
+VkPhysicalDevice    m_PhysicalDevice;
 //-----------------------------------------------------------------------------
 // SHADERS
 //-----------------------------------------------------------------------------
@@ -721,7 +722,8 @@ bool ImGui_ImplVulkan_CreateDeviceObjects()
 
     VkPipelineMultisampleStateCreateInfo ms_info = {};
     ms_info.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-    ms_info.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+    //ms_info.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+	ms_info.rasterizationSamples = getMaximumPossibleSamples();
 
     VkPipelineColorBlendAttachmentState color_attachment[1] = {};
     color_attachment[0].blendEnable = VK_TRUE;
@@ -817,6 +819,7 @@ bool    ImGui_ImplVulkan_Init(ImGui_ImplVulkan_InitInfo* info, VkRenderPass rend
     IM_ASSERT(info->ImageCount >= info->MinImageCount);
     IM_ASSERT(render_pass != VK_NULL_HANDLE);
 
+	m_PhysicalDevice = info->PhysicalDevice;
     g_VulkanInitInfo = *info;
     g_RenderPass = render_pass;
     ImGui_ImplVulkan_CreateDeviceObjects();
@@ -1215,4 +1218,29 @@ void ImGui_ImplVulkanH_DestroyWindowRenderBuffers(VkDevice device, ImGui_ImplVul
     buffers->FrameRenderBuffers = NULL;
     buffers->Index = 0;
     buffers->Count = 0;
+}
+
+VkSampleCountFlagBits getMaximumPossibleSamples()
+{
+	VkPhysicalDeviceProperties physicalDeviceProperties;
+	vkGetPhysicalDeviceProperties(m_PhysicalDevice, &physicalDeviceProperties);
+
+	VkSampleCountFlags counts;
+	if (physicalDeviceProperties.limits.framebufferColorSampleCounts < physicalDeviceProperties.limits.framebufferDepthSampleCounts)
+	{
+		counts = physicalDeviceProperties.limits.framebufferColorSampleCounts;
+	}
+	else
+	{
+		counts = physicalDeviceProperties.limits.framebufferDepthSampleCounts;
+	}
+
+	if (counts & VK_SAMPLE_COUNT_64_BIT) { return VK_SAMPLE_COUNT_64_BIT; }
+	if (counts & VK_SAMPLE_COUNT_32_BIT) { return VK_SAMPLE_COUNT_32_BIT; }
+	if (counts & VK_SAMPLE_COUNT_16_BIT) { return VK_SAMPLE_COUNT_16_BIT; }
+	if (counts & VK_SAMPLE_COUNT_8_BIT) { return VK_SAMPLE_COUNT_8_BIT; }
+	if (counts & VK_SAMPLE_COUNT_4_BIT) { return VK_SAMPLE_COUNT_4_BIT; }
+	if (counts & VK_SAMPLE_COUNT_2_BIT) { return VK_SAMPLE_COUNT_2_BIT; }
+
+	return VK_SAMPLE_COUNT_1_BIT;
 }

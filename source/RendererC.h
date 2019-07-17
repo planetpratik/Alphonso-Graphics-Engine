@@ -141,6 +141,7 @@ namespace AlphonsoGraphicsEngine
 		void createGraphicsPipeline();
 		void createFramebuffers();
 		void createCommandPool();
+		void createMSAAColorResources();
 		void createDepthResources();
 		VkFormat findSupportedFormat(const std::vector<VkFormat>& candidates, VkImageTiling tiling, VkFormatFeatureFlags features);
 		VkFormat findDepthFormat();
@@ -149,7 +150,7 @@ namespace AlphonsoGraphicsEngine
 		void createTextureImageView();
 		void createTextureSampler();
 		VkImageView createImageView(VkImage image, VkFormat format, VkImageAspectFlags aspectFlags);
-		void createImage(uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage& image, VkDeviceMemory& imageMemory);
+		void createImage(uint32_t width, uint32_t height, VkSampleCountFlagBits sampleCount, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage& image, VkDeviceMemory& imageMemory);
 		void transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout);
 		void copyBufferToImage(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height);
 		void loadModel();
@@ -176,6 +177,9 @@ namespace AlphonsoGraphicsEngine
 		std::vector<const char*> getRequiredExtensions();
 		bool checkValidationLayerSupport();
 		void ImGuiSetupWindow();
+		VkSampleCountFlagBits getMaximumPossibleSampleCount();
+
+
 
 		std::shared_ptr<AlphonsoGraphicsEngine::FirstPersonCamera> mCamera;
 		std::shared_ptr<AlphonsoGraphicsEngine::Projector> mProjector;
@@ -280,9 +284,15 @@ namespace AlphonsoGraphicsEngine
 
 		VkCommandPool commandPool;
 
+		VkImage msaaColorImage;
+		VkDeviceMemory msaaColorImageMemory;
+		VkImageView msaaColorImageView;
+
 		VkImage depthImage;
 		VkDeviceMemory depthImageMemory;
 		VkImageView depthImageView;
+
+		VkSampler shadowMapSampler;
 
 		VkImage textureImage;
 		VkDeviceMemory textureImageMemory;
@@ -315,6 +325,8 @@ namespace AlphonsoGraphicsEngine
 		std::vector<VkSemaphore> renderFinishedSemaphores;
 		std::vector<VkFence> inFlightFences;
 		size_t currentFrame = 0;
+
+		VkSampleCountFlagBits MSAA_Samples = VK_SAMPLE_COUNT_1_BIT;
 
 		glm::mat4 mProjectedTextureScalingMatrix;
 		uint32_t mProjectedTextureWidth = 0;

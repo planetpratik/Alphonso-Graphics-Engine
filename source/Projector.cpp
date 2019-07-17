@@ -7,13 +7,15 @@ using namespace glm;
 
 namespace AlphonsoGraphicsEngine
 {
-	const float Projector::DefaultFieldOfView = 360.0f;
+	const float Projector::DefaultFieldOfView = 800.0f;
 	const float Projector::DefaultNearPlaneDistance = 0.1f;
-	const float Projector::DefaultFarPlaneDistance = 10.0f;
+	const float Projector::DefaultFarPlaneDistance = 100.0f;
+	float Projector::deltaTime = 0.0f;
+	float Projector::lastFrame = 0.0f;
 
 	Projector::Projector(RendererC& renderer) :
 		mFieldOfView(DefaultFieldOfView), mAspectRatio(renderer.AspectRatio()), mNearPlaneDistance(DefaultNearPlaneDistance), mFarPlaneDistance(DefaultFarPlaneDistance),
-		mPosition(), mDirection(), mUp(), mRight(), mViewMatrix(), mProjectionMatrix()
+		mPosition(), mDirection(), mUp(), mRight(), mViewMatrix(), mProjectionMatrix(), mWindow(renderer.Window()), mLastCursorX(0.0), mLastCursorY(0.0)
 	{
 	}
 
@@ -100,10 +102,12 @@ namespace AlphonsoGraphicsEngine
 
 	void Projector::Reset()
 	{
-		mPosition = vec3(0.1306f, 2.3667f, 2.1383f);
-		mDirection = vec3(-0.0292, -0.8150f, -0.5786f);
+		//mPosition = vec3(-2.3, -1.3, 3);
+		mPosition = vec3(-1.78, -0.963, 3);
+		//mDirection = vec3(-2.0, 2.0, -2.0f);
+		mDirection = vec3(-0.684, 0.325, -0.652f);
 		mUp = vec3(0.0f, 0.0f, 1.0f);
-		mRight = vec3(1.0, 0.0f, 0.0f);
+		mRight = vec3(1.0f, 0.0f, 0.0f);
 	}
 
 	void Projector::Initialize()
@@ -115,12 +119,69 @@ namespace AlphonsoGraphicsEngine
 	void Projector::Update(const GameTime& gameTime)
 	{
 		UNREFERENCED_PARAMETER(gameTime);
+
+		float currentFrame = static_cast<float>(glfwGetTime());
+		deltaTime = currentFrame - lastFrame;
+		lastFrame = currentFrame;
+
+		vec2 movementAmount = vec2(0.0f, 0.0f);
+		if (glfwGetKey(mWindow, GLFW_KEY_I))
+		{
+			movementAmount.y = 1.0f;
+		}
+
+		if (glfwGetKey(mWindow, GLFW_KEY_K))
+		{
+			movementAmount.y = -1.0f;
+		}
+
+		if (glfwGetKey(mWindow, GLFW_KEY_J))
+		{
+			movementAmount.x = -1.0f;
+		}
+
+		if (glfwGetKey(mWindow, GLFW_KEY_L))
+		{
+			movementAmount.x = 1.0f;
+		}
+
+		vec2 rotationAmount = vec2(0.0f, 0.0f);
+
+		double x, y;
+		glfwGetCursorPos(mWindow, &x, &y);
+
+		if (glfwGetMouseButton(mWindow, GLFW_MOUSE_BUTTON_RIGHT))
+		{
+			rotationAmount.x = static_cast<float>(mLastCursorX - x) * 4.0f;
+			rotationAmount.y = static_cast<float>(mLastCursorY - y) * 4.0f;
+		}
+
+		mLastCursorX = x;
+		mLastCursorY = y;
+
+		vec2 rotationVector = rotationAmount * radians(30.0f) * deltaTime;
+
+
+		mat4 rotationMatrix = rotate(mat4(1), rotationVector.y, mRight);
+		rotationMatrix = rotate(rotationMatrix, rotationVector.x, vec3(0.0f, 0.0f, 1.0f));
+		ApplyRotation(rotationMatrix);
+
+		vec2 movement = movementAmount * (1.0f) * deltaTime;
+
+		vec3 strafe = mRight * movement.x;
+		mPosition += strafe;
+
+		vec3 forward = mDirection * movement.y;
+		mPosition += forward;
+
 		UpdateViewMatrix();
 	}
 
 	void Projector::UpdateViewMatrix()
 	{
-		vec3 target = mPosition + mDirection;
+		//vec3 target = mPosition + mDirection;
+		vec3 target = glm::vec3(-0.113268f, -0.649047f, 0.9552f);
+		//vec3 target = glm::vec3(0, 0, 0);
 		mViewMatrix = lookAt(mPosition, target, mUp);
 	}
 

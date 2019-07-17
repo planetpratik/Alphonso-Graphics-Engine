@@ -45,6 +45,8 @@ namespace AlphonsoGraphicsEngine
 		static const float DefaultFieldOfView;
 		static const float DefaultNearPlaneDistance;
 		static const float DefaultFarPlaneDistance;
+		static float deltaTime;			// Time between current frame and last frame
+		static float lastFrame;			// Time of last frame
 
 	protected:
 		float mFieldOfView;
@@ -59,5 +61,9 @@ namespace AlphonsoGraphicsEngine
 
 		glm::mat4 mViewMatrix;
 		glm::mat4 mProjectionMatrix;
+
+		GLFWwindow* mWindow;
+		double mLastCursorX;
+		double mLastCursorY;
 	};
 }

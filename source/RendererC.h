@@ -179,7 +179,12 @@ namespace AlphonsoGraphicsEngine
 		void ImGuiSetupWindow();
 		VkSampleCountFlagBits getMaximumPossibleSampleCount();
 
-
+		void createShadowMap();
+		void createShadowMapSampler();
+		void createShadowMapRenderPass();
+		void createShadowMapFrameBuffer();
+		void updateLight();
+		void updateUniformBufferOffscreen();
 
 		std::shared_ptr<AlphonsoGraphicsEngine::FirstPersonCamera> mCamera;
 		std::shared_ptr<AlphonsoGraphicsEngine::Projector> mProjector;
@@ -238,6 +243,7 @@ namespace AlphonsoGraphicsEngine
 			alignas(16) glm::vec3 pointLightPosition;
 			alignas(4) glm::float32 pointLightRadius;
 			alignas(16) glm::mat4 projectiveTextureMatrix;
+			alignas(16) glm::mat4 WorldLightViewProjection;
 		};
 
 		struct FragmentUniformBufferObject
@@ -250,6 +256,11 @@ namespace AlphonsoGraphicsEngine
 			alignas(16) glm::vec4 specularColor;
 			alignas(4) glm::float32 specularPower;
 		};
+
+		struct OffscreenUniformBufferObjectVS
+		{
+			alignas(16) glm::mat4 WorldLightViewProjection;
+		} uboOffscreenVS;
 
 	private:
 
@@ -292,6 +303,17 @@ namespace AlphonsoGraphicsEngine
 		VkDeviceMemory depthImageMemory;
 		VkImageView depthImageView;
 
+
+		VkPipeline shadowMapPipeline;
+		VkPipelineLayout shadowMapPipelineLayout;
+		VkDescriptorSetLayout shadowMapPipelineDescriptorSetLayout;
+		VkDescriptorSet shadowMapPipelineDescriptorSet;
+		VkRenderPass shadowMapRenderPass;
+		VkImage shadowMapImage;
+		VkDeviceMemory shadowMapImageMemory;
+		VkImageView shadowMapImageView;
+		VkFramebuffer shadowMapFrameBuffer;
+
 		VkSampler shadowMapSampler;
 
 		VkImage textureImage;
@@ -306,6 +328,19 @@ namespace AlphonsoGraphicsEngine
 
 		std::vector<Vertex> vertices;
 		std::vector<uint32_t> indices;
+
+		/*const std::vector<Vertex> simplePlaneVertices = {
+			{{-0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}},
+			{{0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}},
+			{{0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}},
+			{{-0.5f, 0.5f}, {1.0f, 1.0f, 1.0f}}
+		};
+
+		const std::vector<uint16_t> simplePlaneIndices = {
+			0, 1, 2, 2, 3, 0
+		};*/
+
+
 		VkBuffer vertexBuffer;
 		VkDeviceMemory vertexBufferMemory;
 		VkBuffer indexBuffer;
@@ -315,6 +350,8 @@ namespace AlphonsoGraphicsEngine
 		std::vector<VkDeviceMemory> uniformBuffersMemory;
 		std::vector<VkBuffer> fragmentUniformBuffers;
 		std::vector<VkDeviceMemory> fragmentUniformBuffersMemory;
+		std::vector<VkBuffer> offscreenUniformBuffers;
+		std::vector<VkDeviceMemory> offscreenUniformBuffersMemory;
 
 		VkDescriptorPool descriptorPool;
 		std::vector<VkDescriptorSet> descriptorSets;
@@ -333,5 +370,19 @@ namespace AlphonsoGraphicsEngine
 		uint32_t mProjectedTextureHeight = 0;
 		float mProjectorPosition[3] = {};
 		float mProjectorDirection[3] = {};
+
+		// Keep depth range as small as possible
+		// for better shadow map precision
+		float zNear = 1.0f;
+		float zFar = 96.0f;
+
+		// Depth bias (and slope) are used to avoid shadowing artefacts
+		// Constant depth bias factor (always applied)
+		float depthBiasConstant = 1.25f;
+		// Slope depth bias factor, applied depending on polygon's slope
+		float depthBiasSlope = 1.75f;
+
+		glm::vec3 lightPos = glm::vec3(-2,-2,-2);
+		float lightFOV = 45.0f;
 	};
 }

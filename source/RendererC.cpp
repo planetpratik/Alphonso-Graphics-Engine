@@ -122,7 +122,7 @@ namespace AlphonsoGraphicsEngine
 	void RendererC::InitializeImgui(float width, float height)
 	{
 		QueueFamilyIndices Indices = findQueueFamilies(physicalDevice);
-		
+
 		// Setup Dear ImGui context
 		IMGUI_CHECKVERSION();
 		ImGui::CreateContext();
@@ -161,9 +161,10 @@ namespace AlphonsoGraphicsEngine
 		mGameClock.UpdateGameTime(mGameTime);
 		mCamera->Update(gameTime);
 		mProjector->Update(gameTime);
+		updateLight();
 	}
 
-	void RendererC::InitializeWindow() 
+	void RendererC::InitializeWindow()
 	{
 		glfwInit();
 
@@ -190,6 +191,7 @@ namespace AlphonsoGraphicsEngine
 		createCommandPool();
 		createMSAAColorResources();
 		createDepthResources();
+		createShadowMap();
 		createFramebuffers();
 		createTextureImage();
 		createTextureImageView();
@@ -248,32 +250,24 @@ namespace AlphonsoGraphicsEngine
 		ImGui::SetNextWindowSize(WindowSize, ImGuiCond_::ImGuiCond_FirstUseEver);
 		ImGui::SetNextWindowPos(ImVec2(0, 0), ImGuiCond_::ImGuiCond_FirstUseEver);
 		ImGui::NewFrame();
-		
+
 		// render your GUI
 		ImGui::Begin("Alphonso Engine");
 		ImGui::Text("Camera Position: (%f, %f, %f) ", mCamera->Position().x, mCamera->Position().y, mCamera->Position().z);
 		ImGui::Text("Camera Direction: (%f, %f, %f) ", mCamera->Direction().x, mCamera->Direction().y, mCamera->Direction().z);
 		ImGui::Text("Projector Position: (%f, %f, %f) ", mProjector->Position().x, mProjector->Position().y, mProjector->Position().z);
 		ImGui::Text("Projector Direction: (%f, %f, %f) ", mProjector->Direction().x, mProjector->Direction().y, mProjector->Direction().z);
-		
+
 		ImGui::InputFloat3("Projector Position", mProjectorPosition, 4);
 		if (ImGui::SliderFloat3("Projector Position", mProjectorPosition, -10.0f, 10.0f))
 		{
 			mProjector->SetPosition(glm::vec3(mProjectorPosition[0], mProjectorPosition[1], mProjectorPosition[2]));
 		}
-		/*if(ImGui::Button("Set Postion"))
-		{
-			mProjector->SetPosition(glm::vec3(mProjectorPosition[0], mProjectorPosition[1], mProjectorPosition[2]));
-		}*/
 		ImGui::InputFloat3("Projector Direction", mProjectorDirection, 4);
 		if (ImGui::SliderFloat3("Projector Direction", mProjectorDirection, -100.0f, 100.0f))
 		{
 			mProjector->SetDirection(mProjectorDirection[0], mProjectorDirection[1], mProjectorDirection[2]);
 		}
-		/*if (ImGui::Button("Set Direction"))
-		{
-			mProjector->SetDirection(mProjectorDirection[0], mProjectorDirection[1], mProjectorDirection[2]);
-		} */
 		ImGui::End();
 		// Render dear imgui UI box into our window
 		ImGui::Render();
@@ -299,6 +293,40 @@ namespace AlphonsoGraphicsEngine
 				{
 					throw std::runtime_error("failed to begin recording command buffer!");
 				}
+
+				/*
+				First render pass: Generate shadow map by rendering the scene from light's POV
+				*/
+				{
+					std::array<VkClearValue, 2> clearValues = {};
+					clearValues[0].depthStencil = { 1.0f, 0 };
+
+					VkRenderPassBeginInfo renderPassBeginInfo = {};
+					renderPassBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+					renderPassBeginInfo.renderPass = shadowMapRenderPass;
+					renderPassBeginInfo.framebuffer = shadowMapFrameBuffer;
+					renderPassBeginInfo.renderArea.offset = { 0, 0 };
+					renderPassBeginInfo.renderArea.extent = swapChainExtent;
+					renderPassBeginInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
+					renderPassBeginInfo.pClearValues = clearValues.data();
+
+					vkCmdBeginRenderPass(commandBuffers[i], &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
+
+					// Set depth bias (aka "Polygon offset")
+					// Required to avoid shadow mapping artefacts
+					vkCmdSetDepthBias(commandBuffers[i], depthBiasConstant, 0.0f, depthBiasSlope);
+
+					vkCmdBindPipeline(commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, shadowMapPipeline);
+					vkCmdBindDescriptorSets(commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, shadowMapPipelineLayout, 0, 1, &shadowMapPipelineDescriptorSet, 0, NULL);
+					VkBuffer vertexBuffers[] = { vertexBuffer };
+					VkDeviceSize offsets[] = { 0 };
+					vkCmdBindVertexBuffers(commandBuffers[i], 0, 1, vertexBuffers, offsets);
+					vkCmdBindIndexBuffer(commandBuffers[i], indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+					vkCmdDrawIndexed(commandBuffers[i], static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
+
+					vkCmdEndRenderPass(commandBuffers[i]);
+				}
+
 
 				VkRenderPassBeginInfo renderPassInfo = {};
 				renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
@@ -352,6 +380,10 @@ namespace AlphonsoGraphicsEngine
 
 	void RendererC::cleanupSwapChain()
 	{
+		vkDestroyImageView(device, shadowMapImageView, nullptr);
+		vkDestroyImage(device, shadowMapImage, nullptr);
+		vkFreeMemory(device, shadowMapImageMemory, nullptr);
+
 		vkDestroyImageView(device, msaaColorImageView, nullptr);
 		vkDestroyImage(device, msaaColorImage, nullptr);
 		vkFreeMemory(device, msaaColorImageMemory, nullptr);
@@ -365,11 +397,17 @@ namespace AlphonsoGraphicsEngine
 			vkDestroyFramebuffer(device, framebuffer, nullptr);
 		}
 
+		vkDestroyFramebuffer(device, shadowMapFrameBuffer, nullptr);
+
 		vkFreeCommandBuffers(device, commandPool, static_cast<uint32_t>(commandBuffers.size()), commandBuffers.data());
 
 		vkDestroyPipeline(device, graphicsPipeline, nullptr);
 		vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
 		vkDestroyRenderPass(device, renderPass, nullptr);
+
+		vkDestroyPipeline(device, shadowMapPipeline, nullptr);
+		vkDestroyPipelineLayout(device, shadowMapPipelineLayout, nullptr);
+		vkDestroyRenderPass(device, shadowMapRenderPass, nullptr);
 
 		for (auto imageView : swapChainImageViews)
 		{
@@ -385,6 +423,8 @@ namespace AlphonsoGraphicsEngine
 			vkDestroyBuffer(device, fragmentUniformBuffers[i], nullptr);
 			vkFreeMemory(device, fragmentUniformBuffersMemory[i], nullptr);
 		}
+		vkDestroyBuffer(device, offscreenUniformBuffers[0], nullptr);
+		vkFreeMemory(device, fragmentUniformBuffersMemory[0], nullptr);
 		vkDestroyDescriptorPool(device, descriptorPool, nullptr);
 	}
 
@@ -404,6 +444,7 @@ namespace AlphonsoGraphicsEngine
 		vkDestroyImage(device, projectedTextureImage, nullptr);
 		vkFreeMemory(device, projectedTextureImageMemory, nullptr);
 
+		vkDestroyDescriptorSetLayout(device, shadowMapPipelineDescriptorSetLayout, nullptr);
 		vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
 
 		vkDestroyBuffer(device, indexBuffer, nullptr);
@@ -450,6 +491,7 @@ namespace AlphonsoGraphicsEngine
 		createSwapChain();
 		createImageViews();
 		createRenderPass();
+		createShadowMap();
 		createGraphicsPipeline();
 		createMSAAColorResources();
 		createDepthResources();
@@ -757,6 +799,9 @@ namespace AlphonsoGraphicsEngine
 		{
 			throw std::runtime_error("failed to create render pass!");
 		}
+
+		// Create Off-Screen Render Pass
+		createShadowMapRenderPass();
 	}
 
 	void RendererC::createDescriptorSetLayout()
@@ -789,13 +834,25 @@ namespace AlphonsoGraphicsEngine
 		projectedTextureSamplerLayoutBinding.pImmutableSamplers = nullptr;
 		projectedTextureSamplerLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 
-		std::array<VkDescriptorSetLayoutBinding, 4> bindings = { uboLayoutBinding, samplerLayoutBinding, fboLayoutBinding, projectedTextureSamplerLayoutBinding };
+		VkDescriptorSetLayoutBinding shadowMapImageSamplerLayoutBinding = {};
+		shadowMapImageSamplerLayoutBinding.binding = 4;
+		shadowMapImageSamplerLayoutBinding.descriptorCount = 1;
+		shadowMapImageSamplerLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+		shadowMapImageSamplerLayoutBinding.pImmutableSamplers = nullptr;
+		shadowMapImageSamplerLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+		std::array<VkDescriptorSetLayoutBinding, 5> bindings = { uboLayoutBinding, samplerLayoutBinding, fboLayoutBinding, projectedTextureSamplerLayoutBinding, shadowMapImageSamplerLayoutBinding };
 		VkDescriptorSetLayoutCreateInfo layoutInfo = {};
 		layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
 		layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
 		layoutInfo.pBindings = bindings.data();
 
 		if (vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &descriptorSetLayout) != VK_SUCCESS) {
+			throw std::runtime_error("failed to create descriptor set layout!");
+		}
+
+		// For now, use the same pipeline layout for Shadow Mapping Pipeline layout.
+		if (vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &shadowMapPipelineDescriptorSetLayout) != VK_SUCCESS) {
 			throw std::runtime_error("failed to create descriptor set layout!");
 		}
 	}
@@ -934,8 +991,49 @@ namespace AlphonsoGraphicsEngine
 			throw std::runtime_error("failed to create graphics pipeline!");
 		}
 
+		// Create Off-screen Graphics Pipeline for Shadow Mapping
+		// We are reusing model pipeline structs with changes wherever needed.
+
+		VkPipelineLayoutCreateInfo shadowMapPipelineLayoutInfo = {};
+		shadowMapPipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+		shadowMapPipelineLayoutInfo.setLayoutCount = 1;
+		shadowMapPipelineLayoutInfo.pSetLayouts = &shadowMapPipelineDescriptorSetLayout;
+
+		if (vkCreatePipelineLayout(device, &shadowMapPipelineLayoutInfo, nullptr, &shadowMapPipelineLayout) != VK_SUCCESS)
+		{
+			throw std::runtime_error("failed to create pipeline layout!");
+		}
+
+		auto vertShaderCodeForShadowMapping = readFile("../../Assets/Shaders/depthMapVert.spv");
+		VkShaderModule vertShaderModuleForShadowMapping = createShaderModule(vertShaderCodeForShadowMapping);
+
+		VkPipelineShaderStageCreateInfo vertShaderStageInfoForShadowMapping = {};
+		vertShaderStageInfoForShadowMapping.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+		vertShaderStageInfoForShadowMapping.stage = VK_SHADER_STAGE_VERTEX_BIT;
+		vertShaderStageInfoForShadowMapping.module = vertShaderModuleForShadowMapping;
+		vertShaderStageInfoForShadowMapping.pName = "main";
+
+		VkPipelineShaderStageCreateInfo shadowMappingShaderStages[] = { vertShaderStageInfoForShadowMapping };
+		pipelineInfo.stageCount = 1;
+		pipelineInfo.pStages = shadowMappingShaderStages;
+		colorBlending.attachmentCount = 0;
+		rasterizer.depthBiasEnable = VK_TRUE;
+		std::vector<VkDynamicState> dynamicStateEnables = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_DYNAMIC_STATE_DEPTH_BIAS };
+		VkPipelineDynamicStateCreateInfo dynamicStateCreateInfo = {};
+		dynamicStateCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+		dynamicStateCreateInfo.dynamicStateCount = static_cast<uint32_t>(dynamicStateEnables.size());
+		dynamicStateCreateInfo.pDynamicStates = dynamicStateEnables.data();
+		pipelineInfo.pDynamicState = &dynamicStateCreateInfo;
+		pipelineInfo.layout = shadowMapPipelineLayout;
+		pipelineInfo.renderPass = shadowMapRenderPass;
+		if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &shadowMapPipeline) != VK_SUCCESS)
+		{
+			throw std::runtime_error("failed to create graphics pipeline!");
+		}
+
 		vkDestroyShaderModule(device, fragShaderModule, nullptr);
 		vkDestroyShaderModule(device, vertShaderModule, nullptr);
+		vkDestroyShaderModule(device, vertShaderModuleForShadowMapping, nullptr);
 	}
 
 	void RendererC::createFramebuffers()
@@ -944,10 +1042,6 @@ namespace AlphonsoGraphicsEngine
 
 		for (size_t i = 0; i < swapChainImageViews.size(); i++)
 		{
-			/*std::array<VkImageView, 2> attachments = {
-				swapChainImageViews[i],
-				depthImageView
-			};*/
 			std::array<VkImageView, 3> attachments = {
 				msaaColorImageView,
 				depthImageView,
@@ -968,6 +1062,9 @@ namespace AlphonsoGraphicsEngine
 				throw std::runtime_error("failed to create framebuffer!");
 			}
 		}
+
+		// Create Off-Screeb Frame Buffer for Shadow Map
+		createShadowMapFrameBuffer();
 	}
 
 	void RendererC::createCommandPool()
@@ -1170,6 +1267,9 @@ namespace AlphonsoGraphicsEngine
 		{
 			throw std::runtime_error("failed to create projected texture sampler!");
 		}
+
+		// Create Shadow Map Sampler
+		createShadowMapSampler();
 	}
 
 	VkImageView RendererC::createImageView(VkImage image, VkFormat format, VkImageAspectFlags aspectFlags)
@@ -1288,7 +1388,7 @@ namespace AlphonsoGraphicsEngine
 			sourceStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
 			destinationStage = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
 		}
-		else if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL) 
+		else if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL)
 		{
 			barrier.srcAccessMask = 0;
 			barrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
@@ -1431,22 +1531,26 @@ namespace AlphonsoGraphicsEngine
 	{
 		VkDeviceSize bufferSize = sizeof(UniformBufferObject);
 		VkDeviceSize fragmentUniformBufferSize = sizeof(FragmentUniformBufferObject);
+		VkDeviceSize offscreenbufferSize = sizeof(OffscreenUniformBufferObjectVS);
 
 		uniformBuffers.resize(swapChainImages.size());
 		uniformBuffersMemory.resize(swapChainImages.size());
 		fragmentUniformBuffers.resize(swapChainImages.size());
 		fragmentUniformBuffersMemory.resize(swapChainImages.size());
+		offscreenUniformBuffers.resize(1);
+		offscreenUniformBuffersMemory.resize(1);
 
 		for (size_t i = 0; i < swapChainImages.size(); i++)
 		{
 			createBuffer(bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, uniformBuffers[i], uniformBuffersMemory[i]);
 			createBuffer(fragmentUniformBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, fragmentUniformBuffers[i], fragmentUniformBuffersMemory[i]);
 		}
+		createBuffer(offscreenbufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, offscreenUniformBuffers[0], offscreenUniformBuffersMemory[0]);
 	}
 
 	void RendererC::createDescriptorPool()
 	{
-		std::array<VkDescriptorPoolSize, 5> poolSizes = {};
+		std::array<VkDescriptorPoolSize, 13> poolSizes = {};
 		poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
 		poolSizes[0].descriptorCount = static_cast<uint32_t>(swapChainImages.size());
 		poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -1455,14 +1559,32 @@ namespace AlphonsoGraphicsEngine
 		poolSizes[2].descriptorCount = static_cast<uint32_t>(swapChainImages.size());
 		poolSizes[3].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 		poolSizes[3].descriptorCount = static_cast<uint32_t>(swapChainImages.size());
+		// Descriptor Pool for passing Shadow Map
 		poolSizes[4].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 		poolSizes[4].descriptorCount = static_cast<uint32_t>(swapChainImages.size());
+		// This Descriptor Pool is Used by ImGui
+		poolSizes[5].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+		poolSizes[5].descriptorCount = static_cast<uint32_t>(swapChainImages.size());
+		poolSizes[6].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+		poolSizes[6].descriptorCount = static_cast<uint32_t>(swapChainImages.size());
+		poolSizes[7].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+		poolSizes[7].descriptorCount = static_cast<uint32_t>(swapChainImages.size());
+		poolSizes[8].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+		poolSizes[8].descriptorCount = static_cast<uint32_t>(swapChainImages.size());
+		poolSizes[9].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+		poolSizes[9].descriptorCount = static_cast<uint32_t>(swapChainImages.size());
+		poolSizes[10].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+		poolSizes[10].descriptorCount = static_cast<uint32_t>(swapChainImages.size());
+		poolSizes[11].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+		poolSizes[11].descriptorCount = static_cast<uint32_t>(swapChainImages.size());
+		poolSizes[12].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+		poolSizes[12].descriptorCount = static_cast<uint32_t>(swapChainImages.size());
 
 		VkDescriptorPoolCreateInfo poolInfo = {};
 		poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
 		poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
 		poolInfo.pPoolSizes = poolSizes.data();
-		poolInfo.maxSets = static_cast<uint32_t>(swapChainImages.size()) + 2;
+		poolInfo.maxSets = static_cast<uint32_t>(swapChainImages.size()) + 10;
 
 		if (vkCreateDescriptorPool(device, &poolInfo, nullptr, &descriptorPool) != VK_SUCCESS)
 		{
@@ -1507,7 +1629,12 @@ namespace AlphonsoGraphicsEngine
 			projectedTextureImageInfo.imageView = projectedTextureImageView;
 			projectedTextureImageInfo.sampler = projectedTextureSampler;
 
-			std::array<VkWriteDescriptorSet, 4> descriptorWrites = {};
+			VkDescriptorImageInfo shadowMapImageInfo = {};
+			shadowMapImageInfo.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+			shadowMapImageInfo.imageView = shadowMapImageView;
+			shadowMapImageInfo.sampler = shadowMapSampler;
+
+			std::array<VkWriteDescriptorSet, 5> descriptorWrites = {};
 
 			descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 			descriptorWrites[0].dstSet = descriptorSets[i];
@@ -1541,8 +1668,45 @@ namespace AlphonsoGraphicsEngine
 			descriptorWrites[3].descriptorCount = 1;
 			descriptorWrites[3].pImageInfo = &projectedTextureImageInfo;
 
+			descriptorWrites[4].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+			descriptorWrites[4].dstSet = descriptorSets[i];
+			descriptorWrites[4].dstBinding = 4;
+			descriptorWrites[4].dstArrayElement = 0;
+			descriptorWrites[4].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+			descriptorWrites[4].descriptorCount = 1;
+			descriptorWrites[4].pImageInfo = &shadowMapImageInfo;
+
 			vkUpdateDescriptorSets(device, static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data(), 0, nullptr);
 		}
+
+		// Descriptor set for offscreen rendering
+
+		VkDescriptorSetAllocateInfo shadowMapDSallocInfo = {};
+		shadowMapDSallocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+		shadowMapDSallocInfo.descriptorPool = descriptorPool;
+		shadowMapDSallocInfo.descriptorSetCount = 1;
+		shadowMapDSallocInfo.pSetLayouts = &shadowMapPipelineDescriptorSetLayout;
+
+		if (vkAllocateDescriptorSets(device, &allocInfo, &shadowMapPipelineDescriptorSet) != VK_SUCCESS)
+		{
+			throw std::runtime_error("failed to allocate descriptor sets!");
+		}
+
+		VkDescriptorBufferInfo bufferInfo = {};
+		bufferInfo.buffer = offscreenUniformBuffers[0];
+		bufferInfo.offset = 0;
+		bufferInfo.range = sizeof(OffscreenUniformBufferObjectVS);
+
+		std::array<VkWriteDescriptorSet, 1> descriptorWrites = {};
+		descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		descriptorWrites[0].dstSet = shadowMapPipelineDescriptorSet;
+		descriptorWrites[0].dstBinding = 0;
+		descriptorWrites[0].dstArrayElement = 0;
+		descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+		descriptorWrites[0].descriptorCount = 1;
+		descriptorWrites[0].pBufferInfo = &bufferInfo;
+
+		vkUpdateDescriptorSets(device, static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data(), 0, nullptr);
 	}
 
 	void RendererC::createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory)
@@ -1687,6 +1851,7 @@ namespace AlphonsoGraphicsEngine
 		ubo.pointLightPosition = glm::vec3(0.0569f, -1.078f, 0.4015f);
 		ubo.pointLightRadius = glm::float32(2.0f);
 		ubo.projectiveTextureMatrix = mProjector->ViewProjectionMatrix() * mProjectedTextureScalingMatrix * glm::mat4(1);
+		ubo.WorldLightViewProjection = uboOffscreenVS.WorldLightViewProjection;
 
 		ubo.proj[1][1] *= -1;
 
@@ -1725,7 +1890,7 @@ namespace AlphonsoGraphicsEngine
 		{
 			throw std::runtime_error("failed to acquire swap chain image!");
 		}
-
+		updateUniformBufferOffscreen();
 		updateUniformBuffer(imageIndex);
 
 		VkSubmitInfo submitInfo = {};
@@ -2015,4 +2180,154 @@ namespace AlphonsoGraphicsEngine
 		mProjectedTextureScalingMatrix[3][3] = 1.0f;
 	}
 
+	void RendererC::createShadowMap()
+	{
+		VkFormat depthFormat = findDepthFormat();
+
+		// We will sample directly from the depth attachment for the shadow mapping
+		createImage(swapChainExtent.width, swapChainExtent.height, MSAA_Samples, depthFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, shadowMapImage, shadowMapImageMemory);
+		shadowMapImageView = createImageView(shadowMapImage, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT);
+		transitionImageLayout(shadowMapImage, depthFormat, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
+
+		// Create Shadow Map Sampler
+		//createShadowMapSampler();
+
+		// Create Off-Screen Render Pass
+		//createShadowMapRenderPass();
+
+		// Create Off-Screeb Frame Buffer for Shadow Map
+		//createShadowMapFrameBuffer();
+	}
+
+	void RendererC::createShadowMapSampler()
+	{
+		// Create sampler to sample from to depth attachment 
+		// Used to sample in the fragment shader for shadowed rendering
+		VkSamplerCreateInfo sampler = {};
+		sampler.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+		sampler.magFilter = VK_FILTER_LINEAR;
+		sampler.minFilter = VK_FILTER_LINEAR;
+		sampler.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+		sampler.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+		sampler.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+		sampler.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+		sampler.mipLodBias = 0.0f;
+		sampler.maxAnisotropy = 1.0f;
+		sampler.minLod = 0.0f;
+		sampler.maxLod = 1.0f;
+		sampler.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
+		if (vkCreateSampler(device, &sampler, nullptr, &shadowMapSampler) != VK_SUCCESS)
+		{
+			throw std::runtime_error("failed to create framebuffer!");
+		}
+	}
+
+	void RendererC::createShadowMapRenderPass()
+	{
+		VkFormat depthFormat = findDepthFormat();
+
+		VkAttachmentDescription attachmentDescription{};
+		attachmentDescription.format = depthFormat;
+		attachmentDescription.samples = MSAA_Samples;//VK_SAMPLE_COUNT_1_BIT;
+		attachmentDescription.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;							// Clear depth at beginning of the render pass
+		attachmentDescription.storeOp = VK_ATTACHMENT_STORE_OP_STORE;						// We will read from depth, so it's important to store the depth attachment results
+		attachmentDescription.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+		attachmentDescription.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+		attachmentDescription.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;					// We don't care about initial layout of the attachment
+		attachmentDescription.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;// Attachment will be transitioned to shader read at render pass end
+
+		VkAttachmentReference depthReference = {};
+		depthReference.attachment = 0;
+		depthReference.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;			// Attachment will be used as depth/stencil during render pass
+
+		VkSubpassDescription subpass = {};
+		subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+		subpass.colorAttachmentCount = 0;													// No color attachments
+		subpass.pDepthStencilAttachment = &depthReference;									// Reference to our depth attachment
+
+		// Use subpass dependencies for layout transitions
+		std::array<VkSubpassDependency, 2> dependencies;
+
+		dependencies[0].srcSubpass = VK_SUBPASS_EXTERNAL;
+		dependencies[0].dstSubpass = 0;
+		dependencies[0].srcStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+		dependencies[0].dstStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+		dependencies[0].srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+		dependencies[0].dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+		dependencies[0].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
+
+		dependencies[1].srcSubpass = 0;
+		dependencies[1].dstSubpass = VK_SUBPASS_EXTERNAL;
+		dependencies[1].srcStageMask = VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+		dependencies[1].dstStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+		dependencies[1].srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+		dependencies[1].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+		dependencies[1].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
+
+		VkRenderPassCreateInfo renderPassCreateInfo = {};
+		renderPassCreateInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+		renderPassCreateInfo.attachmentCount = 1;
+		renderPassCreateInfo.pAttachments = &attachmentDescription;
+		renderPassCreateInfo.subpassCount = 1;
+		renderPassCreateInfo.pSubpasses = &subpass;
+		renderPassCreateInfo.dependencyCount = static_cast<uint32_t>(dependencies.size());
+		renderPassCreateInfo.pDependencies = dependencies.data();
+
+		if (vkCreateRenderPass(device, &renderPassCreateInfo, nullptr, &shadowMapRenderPass) != VK_SUCCESS)
+		{
+			throw std::runtime_error("failed to create render pass!");
+		}
+	}
+
+	void RendererC::createShadowMapFrameBuffer()
+	{
+		std::array<VkImageView, 1> attachments = {
+			shadowMapImageView,
+		};
+
+		VkFramebufferCreateInfo framebufferInfo = {};
+		framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+		framebufferInfo.renderPass = shadowMapRenderPass;
+		framebufferInfo.attachmentCount = static_cast<uint32_t>(attachments.size());
+		framebufferInfo.pAttachments = attachments.data();
+		framebufferInfo.width = swapChainExtent.width;
+		framebufferInfo.height = swapChainExtent.height;
+		framebufferInfo.layers = 1;
+
+		if (vkCreateFramebuffer(device, &framebufferInfo, nullptr, &shadowMapFrameBuffer) != VK_SUCCESS)
+		{
+			throw std::runtime_error("failed to create framebuffer!");
+		}
+	}
+
+	void RendererC::updateLight()
+	{
+		static auto startTime = std::chrono::high_resolution_clock::now();
+
+		auto currentTime = std::chrono::high_resolution_clock::now();
+		float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
+
+		// Animate the light source
+		lightPos.x = cos(glm::radians(time * 360.0f)) * 40.0f;
+		lightPos.y = -50.0f + sin(glm::radians(time * 360.0f)) * 20.0f;
+		lightPos.z = 25.0f + sin(glm::radians(time * 360.0f)) * 5.0f;
+	}
+
+	void RendererC::updateUniformBufferOffscreen()
+	{
+		uboOffscreenVS = {};
+
+		// Matrix from light's point of view
+		glm::mat4 depthProjectionMatrix = glm::perspective(glm::radians(lightFOV), 1.0f, zNear, zFar);
+		depthProjectionMatrix[1][1] *= -1;
+		glm::mat4 depthViewMatrix = glm::lookAt(lightPos, glm::vec3(0.0f), glm::vec3(0, 1, 0));
+		glm::mat4 depthModelMatrix = glm::mat4(1.0f);
+
+		uboOffscreenVS.WorldLightViewProjection = depthProjectionMatrix * depthViewMatrix * depthModelMatrix;
+
+		void* data;
+		vkMapMemory(device, offscreenUniformBuffersMemory[0], 0, sizeof(uboOffscreenVS), 0, &data);
+		memcpy(data, &uboOffscreenVS, sizeof(uboOffscreenVS));
+		vkUnmapMemory(device, offscreenUniformBuffersMemory[0]);
+	}
 }

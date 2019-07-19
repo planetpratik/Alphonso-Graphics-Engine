@@ -14,6 +14,7 @@ layout(binding = 2) uniform FragmentUniformBufferObject
 }fbo;
 
 layout(binding = 3) uniform sampler2D projectedTexSampler;
+layout(binding = 4) uniform sampler2D ShadowMapSampler;
 
 layout(location = 0) in vec3 fragColor;
 layout(location = 1) in vec2 fragTexCoord;
@@ -22,11 +23,15 @@ layout(location = 3) in vec3 fragLightDirection;
 layout(location = 4) in vec3 fragWorldPosition;
 layout(location = 5) in float fragPointLightAttenuation;
 layout(location = 6) in vec4 fragProjectedTextureCoordinate;
+layout(location = 7) in vec4 fragShadowCoordinate;
+
 
 layout(location = 0) out vec4 outColor;
 
 void main() 
 {
+	vec4 whiteColor = vec4(1,1,1,1);
+	vec4 blackColor = vec4(0,0,0,1);
 	vec3 pointLightDirection = normalize(fbo.pointLightPosition - fragWorldPosition);
 	vec3 viewDirection = normalize(fbo.cameraPosition - fragWorldPosition);
 
@@ -54,5 +59,14 @@ void main()
 		vec2 projectedTextureCoordinate = fragProjectedTextureCoordinate.xy / fragProjectedTextureCoordinate.w;
 		vec3 sampledProjectedTexColor = texture(projectedTexSampler, projectedTextureCoordinate.xy).rgb;
 		outColor.rgb *= sampledProjectedTexColor;
+	}
+
+	if(fragShadowCoordinate.w <= 0.0f)
+	{
+		vec3 shadowCoordinate = fragShadowCoordinate.xyz / fragShadowCoordinate.w;
+		float pixelDepth = shadowCoordinate.z;
+		float sampledDepth = texture(ShadowMapSampler, shadowCoordinate.xy).x;
+		vec3 shadow = (pixelDepth > sampledDepth ? blackColor.rgb : whiteColor.rgb);
+		outColor.rgb *= shadow;
 	}
 }

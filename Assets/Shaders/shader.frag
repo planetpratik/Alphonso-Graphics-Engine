@@ -24,6 +24,7 @@ layout(location = 4) in vec3 fragWorldPosition;
 layout(location = 5) in float fragPointLightAttenuation;
 layout(location = 6) in vec4 fragProjectedTextureCoordinate;
 layout(location = 7) in vec4 fragShadowCoordinate;
+layout(location = 8) in vec3 fragLightVectorForShadow;
 
 
 layout(location = 0) out vec4 outColor;
@@ -40,6 +41,7 @@ void main()
 
 	float n_dot_l = dot(lightDirection, normal);
 	float n_dot_l_pointLight = dot(pointLightDirection, normal);
+	float n_dot_l_lightForShadow = dot(fragLightVectorForShadow, normal);
 
 	vec3 halfVector = normalize(pointLightDirection + viewDirection);
 	float n_dot_h_pointLight = dot(normal, halfVector);
@@ -51,7 +53,9 @@ void main()
 	vec3 diffusePointLight = clamp(fbo.pointLightColor.rgb * n_dot_l_pointLight * sampledColor.rgb, 0.0f, 1.0f) * fragPointLightAttenuation;
 	vec3 specular = fbo.specularColor.rgb * min(pow(clamp(n_dot_h_pointLight, 0.0f, 1.0f), fbo.specularPower), sampledColor.w) * fragPointLightAttenuation;
 
-	outColor.rgb = ambient + diffuse + diffusePointLight + specular;
+	vec3 diffuseLightForShadow = clamp(fbo.lightColor.rgb * n_dot_l_lightForShadow * sampledColor.rgb, 0.0f, 1.0f)*(0.1);
+
+	outColor.rgb = ambient + diffuse + diffusePointLight + diffuseLightForShadow + specular;
 	outColor.a = sampledColor.a;
 
 	if(fragProjectedTextureCoordinate.w <= 0.0f)

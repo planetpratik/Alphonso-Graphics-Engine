@@ -10,6 +10,7 @@ layout(binding = 0) uniform UniformBufferObject {
 	float pointLightRadius;
 	mat4 projectiveTextureMatrix;
 	mat4 WorldLightViewProjection;
+	vec3 lightPositionForShadow;
 } ubo;
 
 layout(location = 0) in vec3 inPosition;
@@ -25,6 +26,7 @@ layout(location = 4) out vec3 fragWorldPosition;
 layout(location = 5) out float fragPointLightAttenuation;
 layout(location = 6) out vec4 fragProjectedTextureCoordinate;
 layout(location = 7) out vec4 fragShadowCoordinate;
+layout(location = 8) out vec3 fragLightVectorForShadow;
 
 const mat4 biasMat = mat4( 
 	0.5, 0.0, 0.0, 0.0,
@@ -46,5 +48,6 @@ void main()
 
 	fragProjectedTextureCoordinate = (vec4(inPosition, 1.0f) * ubo.projectiveTextureMatrix).xyzw;
 
+	fragLightVectorForShadow = normalize(ubo.lightPositionForShadow - inPosition);
 	fragShadowCoordinate = ( biasMat * ubo.WorldLightViewProjection * ubo.model ) * vec4(inPosition, 1.0);
 }

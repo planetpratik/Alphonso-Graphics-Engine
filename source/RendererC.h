@@ -244,6 +244,7 @@ namespace AlphonsoGraphicsEngine
 			alignas(4) glm::float32 pointLightRadius;
 			alignas(16) glm::mat4 projectiveTextureMatrix;
 			alignas(16) glm::mat4 WorldLightViewProjection;
+			alignas(16) glm::vec3 lightPositionForShadow;
 		};
 
 		struct FragmentUniformBufferObject
@@ -382,7 +383,7 @@ namespace AlphonsoGraphicsEngine
 		// Slope depth bias factor, applied depending on polygon's slope
 		float depthBiasSlope = 1.75f;
 
-		glm::vec3 lightPos = glm::vec3(-2,-2,-2);
+		glm::vec3 lightPos = glm::vec3(2,2,2);
 		float lightFOV = 45.0f;
 	};
 }

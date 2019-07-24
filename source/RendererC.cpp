@@ -161,7 +161,7 @@ namespace AlphonsoGraphicsEngine
 		mGameClock.UpdateGameTime(mGameTime);
 		mCamera->Update(gameTime);
 		mProjector->Update(gameTime);
-		updateLight();
+		//updateLight();
 	}
 
 	void RendererC::InitializeWindow()
@@ -1551,12 +1551,14 @@ namespace AlphonsoGraphicsEngine
 	void RendererC::createDescriptorPool()
 	{
 		std::array<VkDescriptorPoolSize, 13> poolSizes = {};
+		// First 3 Pool are for model pipeline.
 		poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
 		poolSizes[0].descriptorCount = static_cast<uint32_t>(swapChainImages.size());
 		poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 		poolSizes[1].descriptorCount = static_cast<uint32_t>(swapChainImages.size());
 		poolSizes[2].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
 		poolSizes[2].descriptorCount = static_cast<uint32_t>(swapChainImages.size());
+		// This one is for Projective Texture Mapping
 		poolSizes[3].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 		poolSizes[3].descriptorCount = static_cast<uint32_t>(swapChainImages.size());
 		// Descriptor Pool for passing Shadow Map
@@ -1565,6 +1567,8 @@ namespace AlphonsoGraphicsEngine
 		// This Descriptor Pool is Used by ImGui
 		poolSizes[5].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 		poolSizes[5].descriptorCount = static_cast<uint32_t>(swapChainImages.size());
+
+		// These remaining pools are used by Shadow Mapping Pipeline
 		poolSizes[6].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 		poolSizes[6].descriptorCount = static_cast<uint32_t>(swapChainImages.size());
 		poolSizes[7].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -1687,7 +1691,7 @@ namespace AlphonsoGraphicsEngine
 		shadowMapDSallocInfo.descriptorSetCount = 1;
 		shadowMapDSallocInfo.pSetLayouts = &shadowMapPipelineDescriptorSetLayout;
 
-		if (vkAllocateDescriptorSets(device, &allocInfo, &shadowMapPipelineDescriptorSet) != VK_SUCCESS)
+		if (vkAllocateDescriptorSets(device, &shadowMapDSallocInfo, &shadowMapPipelineDescriptorSet) != VK_SUCCESS)
 		{
 			throw std::runtime_error("failed to allocate descriptor sets!");
 		}
@@ -1852,6 +1856,7 @@ namespace AlphonsoGraphicsEngine
 		ubo.pointLightRadius = glm::float32(2.0f);
 		ubo.projectiveTextureMatrix = mProjector->ViewProjectionMatrix() * mProjectedTextureScalingMatrix * glm::mat4(1);
 		ubo.WorldLightViewProjection = uboOffscreenVS.WorldLightViewProjection;
+		ubo.lightPositionForShadow = lightPos;
 
 		ubo.proj[1][1] *= -1;
 
@@ -2039,6 +2044,10 @@ namespace AlphonsoGraphicsEngine
 
 	bool RendererC::isDeviceSuitable(VkPhysicalDevice Device)
 	{
+		volatile bool isDedicatedGPU = false;
+		VkPhysicalDeviceProperties physicalDeviceProperties;
+		vkGetPhysicalDeviceProperties(Device, &physicalDeviceProperties);
+
 		QueueFamilyIndices Indices = findQueueFamilies(Device);
 
 		bool extensionsSupported = checkDeviceExtensionSupport(Device);
@@ -2052,8 +2061,11 @@ namespace AlphonsoGraphicsEngine
 
 		VkPhysicalDeviceFeatures supportedFeatures;
 		vkGetPhysicalDeviceFeatures(Device, &supportedFeatures);
-
-		return Indices.isComplete() && extensionsSupported && swapChainAdequate && supportedFeatures.samplerAnisotropy;
+		if (physicalDeviceProperties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)
+		{
+			isDedicatedGPU = true;
+		}
+		return Indices.isComplete() && extensionsSupported && swapChainAdequate && supportedFeatures.samplerAnisotropy && isDedicatedGPU;
 	}
 
 	bool RendererC::checkDeviceExtensionSupport(VkPhysicalDevice Device)
@@ -2188,15 +2200,6 @@ namespace AlphonsoGraphicsEngine
 		createImage(swapChainExtent.width, swapChainExtent.height, MSAA_Samples, depthFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, shadowMapImage, shadowMapImageMemory);
 		shadowMapImageView = createImageView(shadowMapImage, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT);
 		transitionImageLayout(shadowMapImage, depthFormat, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
-
-		// Create Shadow Map Sampler
-		//createShadowMapSampler();
-
-		// Create Off-Screen Render Pass
-		//createShadowMapRenderPass();
-
-		// Create Off-Screeb Frame Buffer for Shadow Map
-		//createShadowMapFrameBuffer();
 	}
 
 	void RendererC::createShadowMapSampler()

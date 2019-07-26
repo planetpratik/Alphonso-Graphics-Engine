@@ -49,5 +49,6 @@ void main()
 	fragProjectedTextureCoordinate = (vec4(inPosition, 1.0f) * ubo.projectiveTextureMatrix).xyzw;
 
 	fragLightVectorForShadow = normalize(ubo.lightPositionForShadow - inPosition);
-	fragShadowCoordinate = ( biasMat * ubo.WorldLightViewProjection * ubo.model ) * vec4(inPosition, 1.0);
+	//fragShadowCoordinate =  vec4(inPosition, 1.0) * biasMat * ubo.WorldLightViewProjection * ubo.model;
+	fragShadowCoordinate =  vec4(inPosition, 1.0) * ubo.WorldLightViewProjection;
 }

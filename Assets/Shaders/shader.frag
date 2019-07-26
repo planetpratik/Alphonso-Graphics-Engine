@@ -65,11 +65,11 @@ void main()
 		outColor.rgb *= sampledProjectedTexColor;
 	}
 
-	if(fragShadowCoordinate.w <= 0.0f)
+	if(fragShadowCoordinate.w >= 0.0f)
 	{
 		vec3 shadowCoordinate = fragShadowCoordinate.xyz / fragShadowCoordinate.w;
 		float pixelDepth = shadowCoordinate.z;
-		float sampledDepth = texture(ShadowMapSampler, shadowCoordinate.xy).x;
+		float sampledDepth = texture(ShadowMapSampler, shadowCoordinate.xy).x + 0.05;
 		vec3 shadow = (pixelDepth > sampledDepth ? blackColor.rgb : whiteColor.rgb);
 		outColor.rgb *= shadow;
 	}

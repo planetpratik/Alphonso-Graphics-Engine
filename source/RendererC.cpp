@@ -117,6 +117,7 @@ namespace AlphonsoGraphicsEngine
 		InitializeVulkan();
 		InitializeProjector();
 		InitializeImgui((float)WIDTH, float(HEIGHT));
+		InitializeProxyModelsTransform();
 	}
 
 	void RendererC::InitializeImgui(float width, float height)
@@ -161,7 +162,6 @@ namespace AlphonsoGraphicsEngine
 		mGameClock.UpdateGameTime(mGameTime);
 		mCamera->Update(gameTime);
 		mProjector->Update(gameTime);
-		//updateLight();
 	}
 
 	void RendererC::InitializeWindow()
@@ -196,9 +196,10 @@ namespace AlphonsoGraphicsEngine
 		createTextureImage();
 		createTextureImageView();
 		createTextureSampler();
-		loadModel();
-		createVertexBuffer();
-		createIndexBuffer();
+		loadModel(MODEL_PATH, vertices, indices);
+		loadModel(CUBE_MODEL_PATH, cubeVertices, cubeIndices);
+		createVertexBuffers();
+		createIndexBuffers();
 		createUniformBuffers();
 		createDescriptorPool();
 		createDescriptorSets();
@@ -224,6 +225,17 @@ namespace AlphonsoGraphicsEngine
 		mProjector->SetAspectRatio((float)swapChainExtent.width / swapChainExtent.height);
 		mProjector->Initialize();
 		mProjector->Update(mGameTime);
+	}
+
+	void RendererC::InitializeProxyModelsTransform()
+	{
+		ProxyModelUniformBufferObject pmubo = {};
+		glm::mat4 model = glm::mat4(1.0);
+		model = glm::translate(model, glm::vec3(0.8,0.8,0.8));
+		model = glm::scale(model, glm::vec3(0.2,0.2,0.2));
+		glm::mat4 proxyProjection = mCamera->ProjectionMatrix();
+		proxyProjection[1][1] *= -1;
+		pmubo.mvp = proxyProjection * mCamera->ViewMatrix()* model;
 	}
 
 	void RendererC::recreateImGuiWindow()
@@ -318,11 +330,11 @@ namespace AlphonsoGraphicsEngine
 
 					vkCmdBindPipeline(commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, shadowMapPipeline);
 					vkCmdBindDescriptorSets(commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, shadowMapPipelineLayout, 0, 1, &shadowMapPipelineDescriptorSet, 0, NULL);
-					VkBuffer vertexBuffers[] = { vertexBuffer };
+					VkBuffer vertexBuffers[] = { cubeVertexBuffer };
 					VkDeviceSize offsets[] = { 0 };
 					vkCmdBindVertexBuffers(commandBuffers[i], 0, 1, vertexBuffers, offsets);
-					vkCmdBindIndexBuffer(commandBuffers[i], indexBuffer, 0, VK_INDEX_TYPE_UINT32);
-					vkCmdDrawIndexed(commandBuffers[i], static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
+					vkCmdBindIndexBuffer(commandBuffers[i], cubeIndexBuffer, 0, VK_INDEX_TYPE_UINT32);
+					vkCmdDrawIndexed(commandBuffers[i], static_cast<uint32_t>(cubeIndices.size()), 1, 0, 0, 0);
 
 					vkCmdEndRenderPass(commandBuffers[i]);
 				}
@@ -343,7 +355,16 @@ namespace AlphonsoGraphicsEngine
 				renderPassInfo.pClearValues = clearValues.data();
 				vkCmdBeginRenderPass(commandBuffers[i], &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-				// Bind our Pipeline to draw model
+				// Draw Cube using Proxy Model pipeline
+				vkCmdBindPipeline(commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, proxyModelsPipeline);
+				VkBuffer cubeVertexBuffers[] = { cubeVertexBuffer };
+				VkDeviceSize cubeOffsets[] = { 0 };
+				vkCmdBindVertexBuffers(commandBuffers[i], 0, 1, cubeVertexBuffers, cubeOffsets);
+				vkCmdBindIndexBuffer(commandBuffers[i], cubeIndexBuffer, 0, VK_INDEX_TYPE_UINT32);
+				vkCmdBindDescriptorSets(commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, proxyModelsPipelineLayout, 0, 1, &proxyModelDescriptorSets[i], 0, nullptr);
+				vkCmdDrawIndexed(commandBuffers[i], static_cast<uint32_t>(cubeIndices.size()), 1, 0, 0, 0);
+
+				// Bind model Pipeline to draw Chalet model
 				vkCmdBindPipeline(commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
 				VkBuffer vertexBuffers[] = { vertexBuffer };
 				VkDeviceSize offsets[] = { 0 };
@@ -401,6 +422,9 @@ namespace AlphonsoGraphicsEngine
 
 		vkFreeCommandBuffers(device, commandPool, static_cast<uint32_t>(commandBuffers.size()), commandBuffers.data());
 
+		vkDestroyPipeline(device, proxyModelsPipeline, nullptr);
+		vkDestroyPipelineLayout(device, proxyModelsPipelineLayout, nullptr);
+
 		vkDestroyPipeline(device, graphicsPipeline, nullptr);
 		vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
 		vkDestroyRenderPass(device, renderPass, nullptr);
@@ -422,6 +446,8 @@ namespace AlphonsoGraphicsEngine
 			vkFreeMemory(device, uniformBuffersMemory[i], nullptr);
 			vkDestroyBuffer(device, fragmentUniformBuffers[i], nullptr);
 			vkFreeMemory(device, fragmentUniformBuffersMemory[i], nullptr);
+			vkDestroyBuffer(device, proxyModelsUniformBuffers[i], nullptr);
+			vkFreeMemory(device, proxyModelsUniformBuffersMemory[i], nullptr);
 		}
 		vkDestroyBuffer(device, offscreenUniformBuffers[0], nullptr);
 		vkFreeMemory(device, fragmentUniformBuffersMemory[0], nullptr);
@@ -449,9 +475,13 @@ namespace AlphonsoGraphicsEngine
 
 		vkDestroyBuffer(device, indexBuffer, nullptr);
 		vkFreeMemory(device, indexBufferMemory, nullptr);
+		vkDestroyBuffer(device, cubeIndexBuffer, nullptr);
+		vkFreeMemory(device, cubeIndexBufferMemory, nullptr);
 
 		vkDestroyBuffer(device, vertexBuffer, nullptr);
 		vkFreeMemory(device, vertexBufferMemory, nullptr);
+		vkDestroyBuffer(device, cubeVertexBuffer, nullptr);
+		vkFreeMemory(device, cubeVertexBufferMemory, nullptr);
 
 		for (size_t i = 0; i < static_cast<size_t>(MAX_FRAMES_IN_FLIGHT); ++i) {
 			vkDestroySemaphore(device, renderFinishedSemaphores[i], nullptr);
@@ -855,6 +885,18 @@ namespace AlphonsoGraphicsEngine
 		if (vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &shadowMapPipelineDescriptorSetLayout) != VK_SUCCESS) {
 			throw std::runtime_error("failed to create descriptor set layout!");
 		}
+
+		// Create pipeline layout for Proxy model pipeline
+		std::array<VkDescriptorSetLayoutBinding, 1> proxyModelPipelineLayoutbindings = { uboLayoutBinding };
+		VkDescriptorSetLayoutCreateInfo proxyModelLayoutInfo = {};
+		proxyModelLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+		proxyModelLayoutInfo.bindingCount = static_cast<uint32_t>(proxyModelPipelineLayoutbindings.size());
+		proxyModelLayoutInfo.pBindings = proxyModelPipelineLayoutbindings.data();
+
+		if (vkCreateDescriptorSetLayout(device, &proxyModelLayoutInfo, nullptr, &proxyModelsPipelineDescriptorSetLayout) != VK_SUCCESS) {
+			throw std::runtime_error("failed to create descriptor set layout!");
+		}
+
 	}
 
 	void RendererC::createGraphicsPipeline()
@@ -991,6 +1033,47 @@ namespace AlphonsoGraphicsEngine
 			throw std::runtime_error("failed to create graphics pipeline!");
 		}
 
+		// Create new pipeline for proxy models rendering
+		// We are reusing model pipeline structs with changes wherever needed.
+		
+		VkPipelineLayoutCreateInfo proxyModelPipelineLayoutInfo = {};
+		proxyModelPipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+		proxyModelPipelineLayoutInfo.setLayoutCount = 1;
+		proxyModelPipelineLayoutInfo.pSetLayouts = &proxyModelsPipelineDescriptorSetLayout;
+
+		if (vkCreatePipelineLayout(device, &proxyModelPipelineLayoutInfo, nullptr, &proxyModelsPipelineLayout) != VK_SUCCESS)
+		{
+			throw std::runtime_error("failed to create pipeline layout!");
+		}
+
+		auto vertShaderCodeForProxyModels = readFile("../../Assets/Shaders/proxyModelVert.spv");
+		auto fragShaderCodeForProxyModels = readFile("../../Assets/Shaders/proxyModelFrag.spv");
+		VkShaderModule vertShaderModuleForProxyModels = createShaderModule(vertShaderCodeForProxyModels);
+		VkShaderModule fragShaderModuleForProxyModels = createShaderModule(fragShaderCodeForProxyModels);
+
+		VkPipelineShaderStageCreateInfo vertShaderStageInfoForProxyModels = {};
+		vertShaderStageInfoForProxyModels.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+		vertShaderStageInfoForProxyModels.stage = VK_SHADER_STAGE_VERTEX_BIT;
+		vertShaderStageInfoForProxyModels.module = vertShaderModuleForProxyModels;
+		vertShaderStageInfoForProxyModels.pName = "main";
+
+		VkPipelineShaderStageCreateInfo fragShaderStageInfoForProxyModels = {};
+		fragShaderStageInfoForProxyModels.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+		fragShaderStageInfoForProxyModels.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+		fragShaderStageInfoForProxyModels.module = fragShaderModuleForProxyModels;
+		fragShaderStageInfoForProxyModels.pName = "main";
+
+		VkPipelineShaderStageCreateInfo proxyModelShaderStages[] = { vertShaderStageInfoForProxyModels, fragShaderStageInfoForProxyModels };
+		pipelineInfo.stageCount = 2;
+		pipelineInfo.pStages = proxyModelShaderStages;
+		pipelineInfo.layout = proxyModelsPipelineLayout;
+		pipelineInfo.renderPass = renderPass;
+		
+		if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &proxyModelsPipeline) != VK_SUCCESS)
+		{
+			throw std::runtime_error("failed to create graphics pipeline!");
+		}
+
 		// Create Off-screen Graphics Pipeline for Shadow Mapping
 		// We are reusing model pipeline structs with changes wherever needed.
 
@@ -1018,7 +1101,7 @@ namespace AlphonsoGraphicsEngine
 		pipelineInfo.pStages = shadowMappingShaderStages;
 		colorBlending.attachmentCount = 0;
 		rasterizer.depthBiasEnable = VK_TRUE;
-		std::vector<VkDynamicState> dynamicStateEnables = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_DYNAMIC_STATE_DEPTH_BIAS };
+		std::vector<VkDynamicState> dynamicStateEnables = { /*VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR,*/ VK_DYNAMIC_STATE_DEPTH_BIAS };
 		VkPipelineDynamicStateCreateInfo dynamicStateCreateInfo = {};
 		dynamicStateCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
 		dynamicStateCreateInfo.dynamicStateCount = static_cast<uint32_t>(dynamicStateEnables.size());
@@ -1033,6 +1116,8 @@ namespace AlphonsoGraphicsEngine
 
 		vkDestroyShaderModule(device, fragShaderModule, nullptr);
 		vkDestroyShaderModule(device, vertShaderModule, nullptr);
+		vkDestroyShaderModule(device, vertShaderModuleForProxyModels, nullptr);
+		vkDestroyShaderModule(device, fragShaderModuleForProxyModels, nullptr);
 		vkDestroyShaderModule(device, vertShaderModuleForShadowMapping, nullptr);
 	}
 
@@ -1252,9 +1337,6 @@ namespace AlphonsoGraphicsEngine
 		samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
 		samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
 		samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
-		/*samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
-		samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
-		samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;*/
 		samplerInfo.anisotropyEnable = VK_TRUE;
 		samplerInfo.maxAnisotropy = 16;
 		samplerInfo.borderColor = VK_BORDER_COLOR_INT_OPAQUE_WHITE;
@@ -1436,14 +1518,14 @@ namespace AlphonsoGraphicsEngine
 		endSingleTimeCommands(commandBuffer);
 	}
 
-	void RendererC::loadModel()
+	void RendererC::loadModel(const std::string& modelPath, std::vector<Vertex>& vertices, std::vector<uint32_t>& indices)
 	{
 		tinyobj::attrib_t attrib;
 		std::vector<tinyobj::shape_t> shapes;
 		std::vector<tinyobj::material_t> materials;
 		std::string warn, err;
 
-		if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, MODEL_PATH.c_str()))
+		if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, modelPath.c_str()))
 		{
 			throw std::runtime_error(warn + err);
 		}
@@ -1485,7 +1567,13 @@ namespace AlphonsoGraphicsEngine
 		}
 	}
 
-	void RendererC::createVertexBuffer()
+	void RendererC::createVertexBuffers()
+	{
+		createVertexBuffer(vertices, vertexBuffer, vertexBufferMemory);
+		createVertexBuffer(cubeVertices, cubeVertexBuffer, cubeVertexBufferMemory);
+	}
+
+	void RendererC::createVertexBuffer(std::vector<Vertex>& vertices, VkBuffer& vertexBuffer, VkDeviceMemory& vertexBufferMemory)
 	{
 		VkDeviceSize bufferSize = static_cast<VkDeviceSize>(sizeof(vertices[0])) * static_cast<VkDeviceSize>(vertices.size());
 
@@ -1506,7 +1594,13 @@ namespace AlphonsoGraphicsEngine
 		vkFreeMemory(device, stagingBufferMemory, nullptr);
 	}
 
-	void RendererC::createIndexBuffer()
+	void RendererC::createIndexBuffers()
+	{
+		createIndexBuffer(indices, indexBuffer, indexBufferMemory);
+		createIndexBuffer(cubeIndices, cubeIndexBuffer, cubeIndexBufferMemory);
+	}
+
+	void RendererC::createIndexBuffer(std::vector<uint32_t>& indices, VkBuffer& indexBuffer, VkDeviceMemory& indexBufferMemory)
 	{
 		VkDeviceSize bufferSize = static_cast<VkDeviceSize>(sizeof(indices[0])) * static_cast<VkDeviceSize>(indices.size());
 
@@ -1532,6 +1626,7 @@ namespace AlphonsoGraphicsEngine
 		VkDeviceSize bufferSize = sizeof(UniformBufferObject);
 		VkDeviceSize fragmentUniformBufferSize = sizeof(FragmentUniformBufferObject);
 		VkDeviceSize offscreenbufferSize = sizeof(OffscreenUniformBufferObjectVS);
+		VkDeviceSize proxyUniformBufferSize = sizeof(ProxyModelUniformBufferObject);
 
 		uniformBuffers.resize(swapChainImages.size());
 		uniformBuffersMemory.resize(swapChainImages.size());
@@ -1539,18 +1634,21 @@ namespace AlphonsoGraphicsEngine
 		fragmentUniformBuffersMemory.resize(swapChainImages.size());
 		offscreenUniformBuffers.resize(1);
 		offscreenUniformBuffersMemory.resize(1);
+		proxyModelsUniformBuffers.resize(swapChainImages.size());
+		proxyModelsUniformBuffersMemory.resize(swapChainImages.size());
 
 		for (size_t i = 0; i < swapChainImages.size(); i++)
 		{
 			createBuffer(bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, uniformBuffers[i], uniformBuffersMemory[i]);
 			createBuffer(fragmentUniformBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, fragmentUniformBuffers[i], fragmentUniformBuffersMemory[i]);
+			createBuffer(proxyUniformBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, proxyModelsUniformBuffers[i], proxyModelsUniformBuffersMemory[i]);
 		}
 		createBuffer(offscreenbufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, offscreenUniformBuffers[0], offscreenUniformBuffersMemory[0]);
 	}
 
 	void RendererC::createDescriptorPool()
 	{
-		std::array<VkDescriptorPoolSize, 13> poolSizes = {};
+		std::array<VkDescriptorPoolSize, 14> poolSizes = {};
 		// First 3 Pool are for model pipeline.
 		poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
 		poolSizes[0].descriptorCount = static_cast<uint32_t>(swapChainImages.size());
@@ -1567,28 +1665,30 @@ namespace AlphonsoGraphicsEngine
 		// This Descriptor Pool is Used by ImGui
 		poolSizes[5].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 		poolSizes[5].descriptorCount = static_cast<uint32_t>(swapChainImages.size());
-
-		// These remaining pools are used by Shadow Mapping Pipeline
-		poolSizes[6].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+		// This Descriptor Pool is Used by Proxy Model Pipeline
+		poolSizes[6].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
 		poolSizes[6].descriptorCount = static_cast<uint32_t>(swapChainImages.size());
+		// These remaining pools are used by Shadow Mapping Pipeline
 		poolSizes[7].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 		poolSizes[7].descriptorCount = static_cast<uint32_t>(swapChainImages.size());
 		poolSizes[8].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 		poolSizes[8].descriptorCount = static_cast<uint32_t>(swapChainImages.size());
 		poolSizes[9].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 		poolSizes[9].descriptorCount = static_cast<uint32_t>(swapChainImages.size());
-		poolSizes[10].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+		poolSizes[10].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 		poolSizes[10].descriptorCount = static_cast<uint32_t>(swapChainImages.size());
 		poolSizes[11].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
 		poolSizes[11].descriptorCount = static_cast<uint32_t>(swapChainImages.size());
 		poolSizes[12].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
 		poolSizes[12].descriptorCount = static_cast<uint32_t>(swapChainImages.size());
+		poolSizes[13].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+		poolSizes[13].descriptorCount = static_cast<uint32_t>(swapChainImages.size());
 
 		VkDescriptorPoolCreateInfo poolInfo = {};
 		poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
 		poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
 		poolInfo.pPoolSizes = poolSizes.data();
-		poolInfo.maxSets = static_cast<uint32_t>(swapChainImages.size()) + 10;
+		poolInfo.maxSets = static_cast<uint32_t>(swapChainImages.size()) + 11;
 
 		if (vkCreateDescriptorPool(device, &poolInfo, nullptr, &descriptorPool) != VK_SUCCESS)
 		{
@@ -1711,6 +1811,40 @@ namespace AlphonsoGraphicsEngine
 		descriptorWrites[0].pBufferInfo = &bufferInfo;
 
 		vkUpdateDescriptorSets(device, static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data(), 0, nullptr);
+
+		// Descriptor Sets for proxy models pipeline
+		std::vector<VkDescriptorSetLayout> proxyModelDSLayout(swapChainImages.size(), proxyModelsPipelineDescriptorSetLayout);
+		VkDescriptorSetAllocateInfo proxyModelsDescriptorSetAllocInfo = {};
+		proxyModelsDescriptorSetAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+		proxyModelsDescriptorSetAllocInfo.descriptorPool = descriptorPool;
+		proxyModelsDescriptorSetAllocInfo.descriptorSetCount = static_cast<uint32_t>(swapChainImages.size());
+		proxyModelsDescriptorSetAllocInfo.pSetLayouts = proxyModelDSLayout.data();
+
+		proxyModelDescriptorSets.resize(swapChainImages.size());
+		if (vkAllocateDescriptorSets(device, &proxyModelsDescriptorSetAllocInfo, proxyModelDescriptorSets.data()) != VK_SUCCESS)
+		{
+			throw std::runtime_error("failed to allocate descriptor sets!");
+		}
+
+		for (size_t i = 0; i < swapChainImages.size(); i++)
+		{
+			VkDescriptorBufferInfo bufferInfo = {};
+			bufferInfo.buffer = proxyModelsUniformBuffers[i];
+			bufferInfo.offset = 0;
+			bufferInfo.range = sizeof(ProxyModelUniformBufferObject);
+
+			std::array<VkWriteDescriptorSet, 1> descriptorWrites = {};
+
+			descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+			descriptorWrites[0].dstSet = proxyModelDescriptorSets[i];
+			descriptorWrites[0].dstBinding = 0;
+			descriptorWrites[0].dstArrayElement = 0;
+			descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+			descriptorWrites[0].descriptorCount = 1;
+			descriptorWrites[0].pBufferInfo = &bufferInfo;
+
+			vkUpdateDescriptorSets(device, static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data(), 0, nullptr);
+		}
 	}
 
 	void RendererC::createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory)
@@ -1847,6 +1981,7 @@ namespace AlphonsoGraphicsEngine
 	{
 		UniformBufferObject ubo = {};
 		FragmentUniformBufferObject fbo = {};
+		ProxyModelUniformBufferObject pmubo = {};
 
 		ubo.model = glm::mat4(1);
 		ubo.view = mCamera->ViewMatrix();
@@ -1868,6 +2003,13 @@ namespace AlphonsoGraphicsEngine
 		fbo.specularColor = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f);
 		fbo.specularPower = glm::float32(10.0f);
 
+		glm::mat4 proxymodel = glm::mat4(1.0);
+		proxymodel = glm::translate(proxymodel, glm::vec3(0.8, 0.8, 0.8));
+		proxymodel = glm::scale(proxymodel, glm::vec3(0.2, 0.2, 0.2));
+		glm::mat4 proxyProjection = mCamera->ProjectionMatrix();
+		proxyProjection[1][1] *= -1;
+		pmubo.mvp = proxyProjection * mCamera->ViewMatrix()* proxymodel;
+
 		void* data;
 		vkMapMemory(device, uniformBuffersMemory[currentImage], 0, sizeof(ubo), 0, &data);
 		memcpy(data, &ubo, sizeof(ubo));
@@ -1877,6 +2019,11 @@ namespace AlphonsoGraphicsEngine
 		vkMapMemory(device, fragmentUniformBuffersMemory[currentImage], 0, sizeof(fbo), 0, &fragdata);
 		memcpy(fragdata, &fbo, sizeof(fbo));
 		vkUnmapMemory(device, fragmentUniformBuffersMemory[currentImage]);
+
+		void* proxyModelsVSData;
+		vkMapMemory(device, proxyModelsUniformBuffersMemory[currentImage], 0, sizeof(pmubo), 0, &proxyModelsVSData);
+		memcpy(proxyModelsVSData, &pmubo, sizeof(pmubo));
+		vkUnmapMemory(device, proxyModelsUniformBuffersMemory[currentImage]);
 	}
 
 	void RendererC::drawFrame()
@@ -2231,22 +2378,22 @@ namespace AlphonsoGraphicsEngine
 
 		VkAttachmentDescription attachmentDescription{};
 		attachmentDescription.format = depthFormat;
-		attachmentDescription.samples = MSAA_Samples;//VK_SAMPLE_COUNT_1_BIT;
-		attachmentDescription.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;							// Clear depth at beginning of the render pass
-		attachmentDescription.storeOp = VK_ATTACHMENT_STORE_OP_STORE;						// We will read from depth, so it's important to store the depth attachment results
+		attachmentDescription.samples = MSAA_Samples;
+		attachmentDescription.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;							
+		attachmentDescription.storeOp = VK_ATTACHMENT_STORE_OP_STORE;						
 		attachmentDescription.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
 		attachmentDescription.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-		attachmentDescription.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;					// We don't care about initial layout of the attachment
-		attachmentDescription.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;// Attachment will be transitioned to shader read at render pass end
+		attachmentDescription.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;					
+		attachmentDescription.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
 
 		VkAttachmentReference depthReference = {};
 		depthReference.attachment = 0;
-		depthReference.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;			// Attachment will be used as depth/stencil during render pass
+		depthReference.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;			
 
 		VkSubpassDescription subpass = {};
 		subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-		subpass.colorAttachmentCount = 0;													// No color attachments
-		subpass.pDepthStencilAttachment = &depthReference;									// Reference to our depth attachment
+		subpass.colorAttachmentCount = 0;													
+		subpass.pDepthStencilAttachment = &depthReference;									
 
 		// Use subpass dependencies for layout transitions
 		std::array<VkSubpassDependency, 2> dependencies;
@@ -2301,19 +2448,6 @@ namespace AlphonsoGraphicsEngine
 		{
 			throw std::runtime_error("failed to create framebuffer!");
 		}
-	}
-
-	void RendererC::updateLight()
-	{
-		static auto startTime = std::chrono::high_resolution_clock::now();
-
-		auto currentTime = std::chrono::high_resolution_clock::now();
-		float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
-
-		// Animate the light source
-		lightPos.x = cos(glm::radians(time * 360.0f)) * 40.0f;
-		lightPos.y = -50.0f + sin(glm::radians(time * 360.0f)) * 20.0f;
-		lightPos.z = 25.0f + sin(glm::radians(time * 360.0f)) * 5.0f;
 	}
 
 	void RendererC::updateUniformBufferOffscreen()

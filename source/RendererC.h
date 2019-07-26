@@ -123,6 +123,7 @@ namespace AlphonsoGraphicsEngine
 
 		void InitializeCamera();
 		void InitializeProjector();
+		void InitializeProxyModelsTransform();
 
 		void mainLoop();
 		void cleanupSwapChain();
@@ -153,9 +154,11 @@ namespace AlphonsoGraphicsEngine
 		void createImage(uint32_t width, uint32_t height, VkSampleCountFlagBits sampleCount, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage& image, VkDeviceMemory& imageMemory);
 		void transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout);
 		void copyBufferToImage(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height);
-		void loadModel();
-		void createVertexBuffer();
-		void createIndexBuffer();
+		void loadModel(const std::string& modelPath, std::vector<Vertex>& vertices, std::vector<uint32_t>& indices);
+		void createVertexBuffers();
+		void createVertexBuffer(std::vector<Vertex>& vertices, VkBuffer& vertexBuffer, VkDeviceMemory& vertexBufferMemory);
+		void createIndexBuffers();
+		void createIndexBuffer(std::vector<uint32_t>& indices, VkBuffer& indexBuffer, VkDeviceMemory& indexBufferMemory);
 		void createUniformBuffers();
 		void createDescriptorPool();
 		void createDescriptorSets();
@@ -183,7 +186,6 @@ namespace AlphonsoGraphicsEngine
 		void createShadowMapSampler();
 		void createShadowMapRenderPass();
 		void createShadowMapFrameBuffer();
-		void updateLight();
 		void updateUniformBufferOffscreen();
 
 		std::shared_ptr<AlphonsoGraphicsEngine::FirstPersonCamera> mCamera;
@@ -198,6 +200,7 @@ namespace AlphonsoGraphicsEngine
 		const std::string MODEL_PATH = "../../Assets/Models/ChaletN.objs";
 		const std::string TEXTURE_PATH = "../../Assets/Textures/chalet.png";
 		const std::string PROJECTED_TEXTURE_PATH = "../../Assets/Textures/ProjectedTexture.png";
+		const std::string CUBE_MODEL_PATH = "../../Assets/Models/cube.objs";
 
 		const int MAX_FRAMES_IN_FLIGHT = 2;
 
@@ -263,6 +266,11 @@ namespace AlphonsoGraphicsEngine
 			alignas(16) glm::mat4 WorldLightViewProjection;
 		} uboOffscreenVS;
 
+		struct ProxyModelUniformBufferObject
+		{
+			alignas(16) glm::mat4 mvp;
+		};
+
 	private:
 
 		SwapChainSupportDetails querySwapChainSupport(VkPhysicalDevice device);
@@ -293,6 +301,11 @@ namespace AlphonsoGraphicsEngine
 		VkDescriptorSetLayout descriptorSetLayout;
 		VkPipelineLayout pipelineLayout;
 		VkPipeline graphicsPipeline;
+
+		VkPipeline proxyModelsPipeline;
+		VkPipelineLayout proxyModelsPipelineLayout;
+		VkDescriptorSetLayout proxyModelsPipelineDescriptorSetLayout;
+		VkDescriptorSet proxyModelsPipelineDescriptorSet;
 
 		VkCommandPool commandPool;
 
@@ -330,22 +343,21 @@ namespace AlphonsoGraphicsEngine
 		std::vector<Vertex> vertices;
 		std::vector<uint32_t> indices;
 
-		/*const std::vector<Vertex> simplePlaneVertices = {
-			{{-0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}},
-			{{0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}},
-			{{0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}},
-			{{-0.5f, 0.5f}, {1.0f, 1.0f, 1.0f}}
-		};
-
-		const std::vector<uint16_t> simplePlaneIndices = {
-			0, 1, 2, 2, 3, 0
-		};*/
-
+		std::vector<Vertex> cubeVertices;
+		std::vector<uint32_t> cubeIndices;
 
 		VkBuffer vertexBuffer;
 		VkDeviceMemory vertexBufferMemory;
 		VkBuffer indexBuffer;
 		VkDeviceMemory indexBufferMemory;
+
+		VkBuffer cubeVertexBuffer;
+		VkDeviceMemory cubeVertexBufferMemory;
+		VkBuffer cubeIndexBuffer;
+		VkDeviceMemory cubeIndexBufferMemory;
+		std::vector<VkBuffer> proxyModelsUniformBuffers;
+		std::vector<VkDeviceMemory> proxyModelsUniformBuffersMemory;
+
 
 		std::vector<VkBuffer> uniformBuffers;
 		std::vector<VkDeviceMemory> uniformBuffersMemory;
@@ -356,6 +368,7 @@ namespace AlphonsoGraphicsEngine
 
 		VkDescriptorPool descriptorPool;
 		std::vector<VkDescriptorSet> descriptorSets;
+		std::vector<VkDescriptorSet> proxyModelDescriptorSets;
 
 		std::vector<VkCommandBuffer> commandBuffers;
 
@@ -372,8 +385,7 @@ namespace AlphonsoGraphicsEngine
 		float mProjectorPosition[3] = {};
 		float mProjectorDirection[3] = {};
 
-		// Keep depth range as small as possible
-		// for better shadow map precision
+		// Keep depth range as small as possible for better shadow map precision
 		float zNear = 1.0f;
 		float zFar = 96.0f;
 
@@ -384,6 +396,7 @@ namespace AlphonsoGraphicsEngine
 		float depthBiasSlope = 1.75f;
 
 		glm::vec3 lightPos = glm::vec3(2,2,2);
+
 		float lightFOV = 45.0f;
 	};
 }

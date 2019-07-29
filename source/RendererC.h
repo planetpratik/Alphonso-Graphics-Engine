@@ -395,7 +395,7 @@ namespace AlphonsoGraphicsEngine
 		// Slope depth bias factor, applied depending on polygon's slope
 		float depthBiasSlope = 1.75f;
 
-		glm::vec3 lightPos = glm::vec3(2,2,2);
+		glm::vec3 lightPos = glm::vec3(1.01,1.09,1.31);
 
 		float lightFOV = 45.0f;
 	};

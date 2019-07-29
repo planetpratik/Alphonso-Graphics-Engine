@@ -2454,10 +2454,12 @@ namespace AlphonsoGraphicsEngine
 	{
 		uboOffscreenVS = {};
 
+		auto aspectRatio = ((float)swapChainExtent.width / swapChainExtent.height);
+
 		// Matrix from light's point of view
-		glm::mat4 depthProjectionMatrix = glm::perspective(glm::radians(lightFOV), 1.0f, zNear, zFar);
+		glm::mat4 depthProjectionMatrix = glm::perspective(glm::radians(lightFOV), aspectRatio/* 1.0f*/, zNear, zFar);
 		depthProjectionMatrix[1][1] *= -1;
-		glm::mat4 depthViewMatrix = glm::lookAt(lightPos, glm::vec3(0.0f), glm::vec3(0, 1, 0));
+		glm::mat4 depthViewMatrix = glm::lookAt(lightPos, glm::vec3(1,1,1), glm::vec3(-1,0,1));
 		glm::mat4 depthModelMatrix = glm::mat4(1.0f);
 
 		uboOffscreenVS.WorldLightViewProjection = depthProjectionMatrix * depthViewMatrix * depthModelMatrix;

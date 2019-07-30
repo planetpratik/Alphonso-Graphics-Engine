@@ -86,8 +86,6 @@ namespace AlphonsoGraphicsEngine
 		mLastCursorX = x;
 		mLastCursorY = y;
 
-		//float elapsedTime = gameTime.ElapsedGameTimeSeconds().count();
-		//vec2 rotationVector = rotationAmount * mRotationRate * elapsedTime;
 		vec2 rotationVector = rotationAmount * mRotationRate * deltaTime;
 
 
@@ -96,7 +94,6 @@ namespace AlphonsoGraphicsEngine
 		ApplyRotation(rotationMatrix);
 
 		vec2 movement = movementAmount * mMovementRate * deltaTime;
-		//vec2 movement = movementAmount * mMovementRate * elapsedTime;
 
 		vec3 strafe = mRight * movement.x;
 		mPosition += strafe;

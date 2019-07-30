@@ -95,9 +95,9 @@ namespace AlphonsoGraphicsEngine
 
 	void Camera::Reset()
 	{
-		mPosition = vec3(2.0f, 2.0f, 2.0f);
-		mDirection = vec3(-2.0f, -2.0f, -2.0f);
-		mUp = vec3(0.0f, 0.0f, 1.0f);
+		mPosition = vec3(0.0f, 0.0f, 0.0f);
+		mDirection = vec3(0.0f, 0.0f, 1.0f);
+		mUp = vec3(0.0f, -1.0f, 0.0f);
 		mRight = vec3(1.0, 0.0f, 0.0f);
 	}
 

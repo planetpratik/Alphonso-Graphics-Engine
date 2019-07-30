@@ -216,6 +216,23 @@ namespace AlphonsoGraphicsEngine
 	{
 		mCamera = std::make_shared<FirstPersonCamera>(*this);
 		mCamera->Initialize();
+
+		mCamera->SetPosition(2.0f, 2.0f, 2.0f);
+
+		glm::mat4 rotationMatrix = glm::mat4(1.0f);
+		
+		GLfloat pitch = -45;
+		GLfloat yaw = 45;
+		GLfloat roll = 45;
+
+		rotationMatrix = glm::rotate(rotationMatrix, glm::radians(yaw), glm::vec3(0.0, -1.0, 0.0));
+		mCamera->ApplyRotation(rotationMatrix);
+		mCamera->UpdateViewMatrix();
+		rotationMatrix = glm::rotate(rotationMatrix, glm::radians(pitch), glm::vec3(1.0, 0.0, 0.0));
+		mCamera->ApplyRotation(rotationMatrix);
+		mCamera->UpdateViewMatrix();
+		rotationMatrix = glm::rotate(rotationMatrix, glm::radians(roll), glm::vec3(0.0, 0.0, 1.0));
+		mCamera->ApplyRotation(rotationMatrix);
 		mCamera->Update(mGameTime);
 	}
 
